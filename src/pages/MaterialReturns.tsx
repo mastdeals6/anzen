@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Plus, Eye, Trash2, PackageX, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, Trash2, PackageX, AlertTriangle, Edit } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { DataTable } from '../components/DataTable';
 
@@ -24,10 +24,12 @@ interface MaterialReturn {
 
 interface ReturnItem {
   product_id: string;
-  batch_id: string;
+  batch_id: string | null;
   quantity_returned: number;
   original_quantity: number;
+  unit_price: number;
   condition: string;
+  disposition: string;
   notes?: string;
 }
 
@@ -41,6 +43,11 @@ interface ChallanItem {
   };
   batches: {
     batch_number: string;
+    import_price: number;
+    duty_charges: number;
+    freight_charges: number;
+    other_charges: number;
+    import_quantity: number;
   };
 }
 
@@ -141,7 +148,7 @@ export default function MaterialReturns() {
           batch_id,
           quantity,
           products(product_name, product_code),
-          batches(batch_number)
+          batches(batch_number, import_price, duty_charges, freight_charges, other_charges, import_quantity)
         `)
         .eq('challan_id', challanId);
 
@@ -149,14 +156,28 @@ export default function MaterialReturns() {
 
       setChallanItems(data || []);
 
-      const items: ReturnItem[] = (data || []).map((item) => ({
-        product_id: item.product_id,
-        batch_id: item.batch_id,
-        quantity_returned: 0,
-        original_quantity: item.quantity,
-        condition: 'good',
-        notes: '',
-      }));
+      const items: ReturnItem[] = (data || []).map((item) => {
+        const batch = item.batches;
+        let unitPrice = 0;
+
+        if (batch && batch.import_quantity > 0) {
+          unitPrice = Math.round(
+            (batch.import_price + batch.duty_charges + batch.freight_charges + batch.other_charges) /
+            batch.import_quantity * 1.25
+          );
+        }
+
+        return {
+          product_id: item.product_id,
+          batch_id: item.batch_id,
+          quantity_returned: 0,
+          original_quantity: item.quantity,
+          unit_price: unitPrice,
+          condition: 'good',
+          disposition: 'pending',
+          notes: '',
+        };
+      });
 
       setReturnItems(items);
     } catch (error) {
@@ -214,7 +235,7 @@ export default function MaterialReturns() {
     }
 
     try {
-      const { data: returnData, error: returnError } = await supabase
+      const { data: returnData, error: returnError} = await supabase
         .from('material_returns')
         .insert({
           customer_id: formData.customer_id,
@@ -237,7 +258,9 @@ export default function MaterialReturns() {
         batch_id: item.batch_id,
         quantity_returned: item.quantity_returned,
         original_quantity: item.original_quantity,
+        unit_price: item.unit_price,
         condition: item.condition,
+        disposition: item.disposition,
         notes: item.notes,
       }));
 
@@ -397,7 +420,7 @@ export default function MaterialReturns() {
                   <ol className="mt-1 list-decimal list-inside space-y-1">
                     <li>Select the customer who is returning goods</li>
                     <li>Choose the Delivery Challan that was originally dispatched</li>
-                    <li>The system will show all products, batches, and quantities from that DC</li>
+                    <li>The system will show all products, batches, quantities, and prices from that DC</li>
                     <li>Enter the quantity being returned for each item</li>
                     <li>After approval, stock will be added back to inventory</li>
                   </ol>
@@ -508,7 +531,7 @@ export default function MaterialReturns() {
                     return (
                       <div key={index} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <div className="grid grid-cols-12 gap-4">
-                          <div className="col-span-4">
+                          <div className="col-span-3">
                             <label className="block text-xs text-gray-600 mb-1">Product</label>
                             <div className="text-sm font-medium text-gray-900">
                               {item.products.product_name}
@@ -532,8 +555,15 @@ export default function MaterialReturns() {
                             </div>
                           </div>
 
+                          <div className="col-span-1">
+                            <label className="block text-xs text-gray-600 mb-1">Unit Price</label>
+                            <div className="text-sm font-medium text-gray-900">
+                              {returnItem.unit_price.toLocaleString()}
+                            </div>
+                          </div>
+
                           <div className="col-span-2">
-                            <label className="block text-xs text-gray-600 mb-1">Return Qty</label>
+                            <label className="block text-xs text-gray-600 mb-1">Return Qty *</label>
                             <input
                               type="number"
                               step="0.01"
@@ -565,15 +595,30 @@ export default function MaterialReturns() {
                         </div>
 
                         {returnItem.quantity_returned > 0 && (
-                          <div className="mt-3">
-                            <label className="block text-xs text-gray-600 mb-1">Notes for this item (optional)</label>
-                            <input
-                              type="text"
-                              value={returnItem.notes || ''}
-                              onChange={(e) => updateReturnItem(index, 'notes', e.target.value)}
-                              placeholder="Any additional notes about this return item..."
-                              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500"
-                            />
+                          <div className="mt-3 grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Disposition</label>
+                              <select
+                                value={returnItem.disposition}
+                                onChange={(e) => updateReturnItem(index, 'disposition', e.target.value)}
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500"
+                              >
+                                <option value="pending">Pending Decision</option>
+                                <option value="restock">Restock</option>
+                                <option value="scrap">Scrap</option>
+                                <option value="return_to_supplier">Return to Supplier</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-600 mb-1">Notes (optional)</label>
+                              <input
+                                type="text"
+                                value={returnItem.notes || ''}
+                                onChange={(e) => updateReturnItem(index, 'notes', e.target.value)}
+                                placeholder="Any additional notes..."
+                                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500"
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
