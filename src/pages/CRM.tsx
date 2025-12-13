@@ -100,7 +100,7 @@ export function CRM() {
       // Exclude 'lost' status inquiries from default view (they appear in Archive)
       const { data, error } = await supabase
         .from('crm_inquiries')
-        .select('*, user_profiles!crm_inquiries_assigned_to_fkey(full_name)')
+        .select('*, user_profiles!assigned_to(full_name)')
         .neq('pipeline_status', 'lost')
         .order('created_at', { ascending: false });
 

@@ -24,12 +24,6 @@ interface StockRejection {
     batch_number: string;
     current_stock: number;
   };
-  created_by_profile?: {
-    full_name: string;
-  };
-  inspected_by_profile?: {
-    full_name: string;
-  };
 }
 
 interface Product {
@@ -92,9 +86,7 @@ export default function StockRejections() {
         .select(`
           *,
           product:products(product_name, product_code),
-          batch:batches(batch_number, current_stock),
-          created_by_profile:user_profiles!stock_rejections_created_by_fkey(full_name),
-          inspected_by_profile:user_profiles!stock_rejections_inspected_by_fkey(full_name)
+          batch:batches(batch_number, current_stock)
         `)
         .order('created_at', { ascending: false });
 
