@@ -98,7 +98,7 @@ interface ChallanItem {
 export function Sales() {
   const { t } = useLanguage();
   const { profile } = useAuth();
-  const { navigationData, clearNavigationData } = useNavigation();
+  const { navigationData, clearNavigationData, setCurrentPage } = useNavigation();
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
