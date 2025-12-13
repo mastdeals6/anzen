@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { AlertTriangle, Plus, Search, CheckCircle, XCircle, Clock, Upload, Eye, Camera, FileText } from 'lucide-react';
+import { AlertTriangle, Plus, Search, CheckCircle, XCircle, Clock, Upload, Eye, Camera, FileText, Edit, Trash2 } from 'lucide-react';
 import { Modal } from '../components/Modal';
 
 interface StockRejection {
@@ -56,6 +56,8 @@ export default function StockRejections() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedRejection, setSelectedRejection] = useState<StockRejection | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editMode, setEditMode] = useState(false);
+  const [editingRejectionId, setEditingRejectionId] = useState<string | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -171,6 +173,70 @@ export default function StockRejections() {
     setPhotoUrls(photoUrls.filter((_, i) => i !== index));
   };
 
+  const handleEdit = async (rejection: StockRejection) => {
+    try {
+      setFormData({
+        product_id: rejection.product_id,
+        batch_id: rejection.batch_id,
+        rejection_date: rejection.rejection_date,
+        quantity_rejected: rejection.quantity_rejected,
+        rejection_reason: rejection.rejection_reason,
+        rejection_details: rejection.rejection_details,
+        disposition: rejection.disposition,
+        inspection_report: rejection.inspection_report || '',
+      });
+
+      await fetchBatchesForProduct(rejection.product_id);
+
+      if (rejection.photos && Array.isArray(rejection.photos)) {
+        const urls = rejection.photos.map((photo: any) => photo.url);
+        setPhotoUrls(urls);
+      }
+
+      setEditMode(true);
+      setEditingRejectionId(rejection.id);
+      setShowCreateModal(true);
+    } catch (error) {
+      console.error('Error loading rejection for edit:', error);
+      alert('Failed to load rejection for editing');
+    }
+  };
+
+  const handleDelete = async (id: string, photos: any[]) => {
+    if (!confirm('Are you sure you want to delete this stock rejection? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      if (photos && Array.isArray(photos) && photos.length > 0) {
+        for (const photo of photos) {
+          if (photo.url) {
+            const fileName = photo.url.split('/').pop();
+            if (fileName) {
+              await supabase.storage
+                .from('rejection_photos')
+                .remove([`${id}/${fileName}`]);
+            }
+          }
+        }
+      }
+
+      const { error } = await supabase
+        .from('stock_rejections')
+        .delete()
+        .eq('id', id)
+        .eq('status', 'pending_approval');
+
+      if (error) throw error;
+
+      alert('Stock rejection deleted successfully');
+      fetchRejections();
+    } catch (error: any) {
+      console.error('Error deleting rejection:', error);
+      alert(error.message || 'Failed to delete stock rejection');
+    }
+  };
+
   const uploadPhotos = async (rejectionId: string) => {
     const uploadedPhotos = [];
 
@@ -225,50 +291,87 @@ export default function StockRejections() {
       const unitCost = selectedBatch.import_price || 0;
       const financialLoss = formData.quantity_rejected * unitCost;
 
-      const { data: rejectionData, error: rejectionError } = await supabase
-        .from('stock_rejections')
-        .insert({
-          ...formData,
-          unit_cost: unitCost,
-          financial_loss: financialLoss,
-          created_by: user?.id,
-          inspected_by: user?.id,
-        })
-        .select()
-        .single();
-
-      if (rejectionError) throw rejectionError;
-
-      let uploadedPhotos = [];
-      if (photos.length > 0) {
-        uploadedPhotos = await uploadPhotos(rejectionData.id);
-
-        await supabase
+      if (editMode && editingRejectionId) {
+        const { error: rejectionError } = await supabase
           .from('stock_rejections')
-          .update({ photos: uploadedPhotos })
-          .eq('id', rejectionData.id);
+          .update({
+            ...formData,
+            unit_cost: unitCost,
+            financial_loss: financialLoss,
+            inspected_by: user?.id,
+          })
+          .eq('id', editingRejectionId)
+          .eq('status', 'pending_approval');
+
+        if (rejectionError) throw rejectionError;
+
+        let uploadedPhotos = [];
+        if (photos.length > 0) {
+          uploadedPhotos = await uploadPhotos(editingRejectionId);
+
+          const { data: existingRejection } = await supabase
+            .from('stock_rejections')
+            .select('photos')
+            .eq('id', editingRejectionId)
+            .single();
+
+          const existingPhotos = existingRejection?.photos || [];
+          const allPhotos = [...existingPhotos, ...uploadedPhotos];
+
+          await supabase
+            .from('stock_rejections')
+            .update({ photos: allPhotos })
+            .eq('id', editingRejectionId);
+        }
+
+        alert('Stock rejection updated successfully');
+      } else {
+        const { data: rejectionData, error: rejectionError } = await supabase
+          .from('stock_rejections')
+          .insert({
+            ...formData,
+            unit_cost: unitCost,
+            financial_loss: financialLoss,
+            created_by: user?.id,
+            inspected_by: user?.id,
+          })
+          .select()
+          .single();
+
+        if (rejectionError) throw rejectionError;
+
+        let uploadedPhotos = [];
+        if (photos.length > 0) {
+          uploadedPhotos = await uploadPhotos(rejectionData.id);
+
+          await supabase
+            .from('stock_rejections')
+            .update({ photos: uploadedPhotos })
+            .eq('id', rejectionData.id);
+        }
+
+        if (financialLoss >= 100) {
+          const requiredRole = financialLoss >= 1000 ? 'admin' : 'manager';
+          await supabase.from('approval_workflows').insert({
+            transaction_type: 'stock_rejection',
+            transaction_id: rejectionData.id,
+            requested_by: user?.id,
+            amount: financialLoss,
+            quantity: formData.quantity_rejected,
+            status: 'pending',
+            metadata: { required_role: requiredRole },
+          });
+        }
+
+        alert(t('rejectionCreatedSuccessfully') || 'Stock rejection created successfully');
       }
 
-      if (financialLoss >= 100) {
-        const requiredRole = financialLoss >= 1000 ? 'admin' : 'manager';
-        await supabase.from('approval_workflows').insert({
-          transaction_type: 'stock_rejection',
-          transaction_id: rejectionData.id,
-          requested_by: user?.id,
-          amount: financialLoss,
-          quantity: formData.quantity_rejected,
-          status: 'pending',
-          metadata: { required_role: requiredRole },
-        });
-      }
-
-      alert(t('rejectionCreatedSuccessfully') || 'Stock rejection created successfully');
       setShowCreateModal(false);
       resetForm();
       fetchRejections();
     } catch (error: any) {
-      console.error('Error creating rejection:', error);
-      alert(error.message || t('errorCreatingRejection') || 'Error creating stock rejection');
+      console.error('Error saving rejection:', error);
+      alert(error.message || t('errorCreatingRejection') || 'Error saving stock rejection');
     }
   };
 
@@ -285,6 +388,8 @@ export default function StockRejections() {
     });
     setPhotos([]);
     setPhotoUrls([]);
+    setEditMode(false);
+    setEditingRejectionId(null);
   };
 
   const getStatusBadge = (status: string) => {
@@ -420,16 +525,37 @@ export default function StockRejections() {
                     {getStatusBadge(rejection.status)}
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    <button
-                      onClick={() => {
-                        setSelectedRejection(rejection);
-                        setShowDetailsModal(true);
-                      }}
-                      className="text-blue-600 hover:text-blue-800 inline-flex items-center"
-                    >
-                      <Eye className="w-4 h-4 mr-1" />
-                      {t('view') || 'View'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedRejection(rejection);
+                          setShowDetailsModal(true);
+                        }}
+                        className="text-blue-600 hover:text-blue-800 inline-flex items-center"
+                      >
+                        <Eye className="w-4 h-4 mr-1" />
+                        {t('view') || 'View'}
+                      </button>
+
+                      {rejection.status === 'pending_approval' && (
+                        <>
+                          <button
+                            onClick={() => handleEdit(rejection)}
+                            className="text-yellow-600 hover:text-yellow-800 inline-flex items-center"
+                            title="Edit Rejection"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(rejection.id, rejection.photos)}
+                            className="text-red-600 hover:text-red-800 inline-flex items-center"
+                            title="Delete Rejection"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -450,7 +576,7 @@ export default function StockRejections() {
             setShowCreateModal(false);
             resetForm();
           }}
-          title={t('createStockRejection') || 'Create Stock Rejection'}
+          title={editMode ? (t('editStockRejection') || 'Edit Stock Rejection') : (t('createStockRejection') || 'Create Stock Rejection')}
         >
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -646,7 +772,7 @@ export default function StockRejections() {
                 type="submit"
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
-                {t('createRejection') || 'Create Rejection'}
+                {editMode ? (t('updateRejection') || 'Update Rejection') : (t('createRejection') || 'Create Rejection')}
               </button>
             </div>
           </form>

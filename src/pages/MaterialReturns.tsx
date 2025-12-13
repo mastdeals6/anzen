@@ -73,6 +73,8 @@ export default function MaterialReturns() {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<any>(null);
   const [selectedReturnItems, setSelectedReturnItems] = useState<any[]>([]);
+  const [editMode, setEditMode] = useState(false);
+  const [editingReturnId, setEditingReturnId] = useState<string | null>(null);
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [deliveryChallans, setDeliveryChallans] = useState<DeliveryChallan[]>([]);
@@ -130,6 +132,20 @@ export default function MaterialReturns() {
 
   const loadDeliveryChallans = async (customerId: string) => {
     try {
+      const { data: invoicesData, error: invoicesError } = await supabase
+        .from('sales_invoices')
+        .select('linked_challan_ids')
+        .not('linked_challan_ids', 'is', null);
+
+      if (invoicesError) throw invoicesError;
+
+      const invoicedChallanIds = new Set<string>();
+      (invoicesData || []).forEach(invoice => {
+        if (invoice.linked_challan_ids && Array.isArray(invoice.linked_challan_ids)) {
+          invoice.linked_challan_ids.forEach((id: string) => invoicedChallanIds.add(id));
+        }
+      });
+
       const { data, error } = await supabase
         .from('delivery_challans')
         .select('id, challan_number, challan_date, customer_id')
@@ -137,7 +153,9 @@ export default function MaterialReturns() {
         .order('challan_date', { ascending: false });
 
       if (error) throw error;
-      setDeliveryChallans(data || []);
+
+      const uninvoicedChallans = (data || []).filter(dc => !invoicedChallanIds.has(dc.id));
+      setDeliveryChallans(uninvoicedChallans);
     } catch (error) {
       console.error('Error loading delivery challans:', error);
     }
@@ -239,48 +257,93 @@ export default function MaterialReturns() {
     }
 
     try {
-      const { data: returnData, error: returnError} = await supabase
-        .from('material_returns')
-        .insert({
-          customer_id: formData.customer_id,
-          original_dc_id: formData.original_dc_id,
-          return_date: formData.return_date,
-          return_type: formData.return_type,
-          return_reason: formData.return_reason,
-          notes: formData.notes,
-          status: 'pending_approval',
-          created_by: user?.id,
-        })
-        .select()
-        .single();
+      if (editMode && editingReturnId) {
+        const { error: returnError } = await supabase
+          .from('material_returns')
+          .update({
+            customer_id: formData.customer_id,
+            original_dc_id: formData.original_dc_id,
+            return_date: formData.return_date,
+            return_type: formData.return_type,
+            return_reason: formData.return_reason,
+            notes: formData.notes,
+          })
+          .eq('id', editingReturnId)
+          .eq('status', 'pending_approval');
 
-      if (returnError) throw returnError;
+        if (returnError) throw returnError;
 
-      const itemsToInsert = validItems.map(item => ({
-        return_id: returnData.id,
-        product_id: item.product_id,
-        batch_id: item.batch_id,
-        quantity_returned: item.quantity_returned,
-        original_quantity: item.original_quantity,
-        unit_price: item.unit_price,
-        condition: item.condition,
-        disposition: item.disposition,
-        notes: item.notes,
-      }));
+        const { error: deleteError } = await supabase
+          .from('material_return_items')
+          .delete()
+          .eq('return_id', editingReturnId);
 
-      const { error: itemsError } = await supabase
-        .from('material_return_items')
-        .insert(itemsToInsert);
+        if (deleteError) throw deleteError;
 
-      if (itemsError) throw itemsError;
+        const itemsToInsert = validItems.map(item => ({
+          return_id: editingReturnId,
+          product_id: item.product_id,
+          batch_id: item.batch_id,
+          quantity_returned: item.quantity_returned,
+          original_quantity: item.original_quantity,
+          unit_price: item.unit_price,
+          condition: item.condition,
+          disposition: item.disposition,
+          notes: item.notes,
+        }));
 
-      alert('Material return created successfully. Pending approval.');
+        const { error: itemsError } = await supabase
+          .from('material_return_items')
+          .insert(itemsToInsert);
+
+        if (itemsError) throw itemsError;
+
+        alert('Material return updated successfully.');
+      } else {
+        const { data: returnData, error: returnError} = await supabase
+          .from('material_returns')
+          .insert({
+            customer_id: formData.customer_id,
+            original_dc_id: formData.original_dc_id,
+            return_date: formData.return_date,
+            return_type: formData.return_type,
+            return_reason: formData.return_reason,
+            notes: formData.notes,
+            status: 'pending_approval',
+            created_by: user?.id,
+          })
+          .select()
+          .single();
+
+        if (returnError) throw returnError;
+
+        const itemsToInsert = validItems.map(item => ({
+          return_id: returnData.id,
+          product_id: item.product_id,
+          batch_id: item.batch_id,
+          quantity_returned: item.quantity_returned,
+          original_quantity: item.original_quantity,
+          unit_price: item.unit_price,
+          condition: item.condition,
+          disposition: item.disposition,
+          notes: item.notes,
+        }));
+
+        const { error: itemsError } = await supabase
+          .from('material_return_items')
+          .insert(itemsToInsert);
+
+        if (itemsError) throw itemsError;
+
+        alert('Material return created successfully. Pending approval.');
+      }
+
       setModalOpen(false);
       resetForm();
       loadReturns();
     } catch (error: any) {
-      console.error('Error creating return:', error);
-      alert(error.message || 'Failed to create material return');
+      console.error('Error saving return:', error);
+      alert(error.message || 'Failed to save material return');
     }
   };
 
@@ -303,6 +366,52 @@ export default function MaterialReturns() {
     } catch (error) {
       console.error('Error loading return items:', error);
       alert('Failed to load return details');
+    }
+  };
+
+  const handleEdit = async (materialReturn: MaterialReturn) => {
+    try {
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('material_return_items')
+        .select(`
+          *,
+          products(product_name, product_code),
+          batches(batch_number, import_price, duty_charges, freight_charges, other_charges, import_quantity)
+        `)
+        .eq('return_id', materialReturn.id);
+
+      if (itemsError) throw itemsError;
+
+      setFormData({
+        customer_id: materialReturn.customer_id,
+        original_dc_id: materialReturn.original_dc_id,
+        return_date: materialReturn.return_date,
+        return_type: materialReturn.return_type,
+        return_reason: materialReturn.return_reason,
+        notes: materialReturn.notes || '',
+      });
+
+      await loadDeliveryChallans(materialReturn.customer_id);
+      await loadChallanItems(materialReturn.original_dc_id);
+
+      const mappedItems: ReturnItem[] = (itemsData || []).map((item) => ({
+        product_id: item.product_id,
+        batch_id: item.batch_id,
+        quantity_returned: item.quantity_returned,
+        original_quantity: item.original_quantity,
+        unit_price: item.unit_price,
+        condition: item.condition,
+        disposition: item.disposition,
+        notes: item.notes || '',
+      }));
+
+      setReturnItems(mappedItems);
+      setEditMode(true);
+      setEditingReturnId(materialReturn.id);
+      setModalOpen(true);
+    } catch (error) {
+      console.error('Error loading return for edit:', error);
+      alert('Failed to load return for editing');
     }
   };
 
@@ -380,6 +489,8 @@ export default function MaterialReturns() {
     setChallanItems([]);
     setReturnItems([]);
     setDeliveryChallans([]);
+    setEditMode(false);
+    setEditingReturnId(null);
   };
 
   const canManage = profile?.role === 'admin' || profile?.role === 'sales' || profile?.role === 'manager';
@@ -471,6 +582,16 @@ export default function MaterialReturns() {
                 <Eye className="w-4 h-4" />
               </button>
 
+              {canManage && ret.status === 'pending_approval' && (
+                <button
+                  onClick={() => handleEdit(ret)}
+                  className="p-1 text-yellow-600 hover:bg-yellow-50 rounded"
+                  title="Edit Return"
+                >
+                  <Edit className="w-4 h-4" />
+                </button>
+              )}
+
               {isManager && ret.status === 'pending_approval' && (
                 <>
                   <button
@@ -509,7 +630,7 @@ export default function MaterialReturns() {
             setModalOpen(false);
             resetForm();
           }}
-          title="Create Material Return"
+          title={editMode ? "Edit Material Return" : "Create Material Return"}
           size="xl"
         >
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -568,7 +689,7 @@ export default function MaterialReturns() {
                   ))}
                 </select>
                 {formData.customer_id && deliveryChallans.length === 0 && (
-                  <p className="text-xs text-gray-500 mt-1">No delivery challans found for this customer</p>
+                  <p className="text-xs text-orange-600 mt-1">No uninvoiced delivery challans found. All DCs are already invoiced - use Credit Notes for returns after invoicing.</p>
                 )}
               </div>
 
@@ -764,7 +885,7 @@ export default function MaterialReturns() {
                 type="submit"
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
               >
-                Create Material Return
+                {editMode ? 'Update Material Return' : 'Create Material Return'}
               </button>
             </div>
           </form>
