@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
+import { CreditNoteView } from '../components/CreditNoteView';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -22,6 +23,11 @@ interface CreditNote {
   total_amount: number;
   customers?: {
     company_name: string;
+    address: string;
+    city: string;
+    phone: string;
+    npwp: string;
+    pharmacy_license: string;
   };
 }
 
@@ -73,6 +79,7 @@ export function CreditNotes() {
   const [modalOpen, setModalOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedCreditNote, setSelectedCreditNote] = useState<CreditNote | null>(null);
+  const [selectedCreditNoteItems, setSelectedCreditNoteItems] = useState<any[]>([]);
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -117,7 +124,7 @@ export function CreditNotes() {
         .from('credit_notes')
         .select(`
           *,
-          customers(company_name)
+          customers(company_name, address, city, phone, npwp, pharmacy_license)
         `)
         .order('created_at', { ascending: false });
 
@@ -174,6 +181,26 @@ export function CreditNotes() {
     }
   };
 
+  const handleViewCreditNote = async (creditNote: CreditNote) => {
+    setSelectedCreditNote(creditNote);
+    try {
+      const { data, error } = await supabase
+        .from('credit_note_items')
+        .select(`
+          *,
+          products(product_name, product_code),
+          batches(batch_number)
+        `)
+        .eq('credit_note_id', creditNote.id);
+
+      if (error) throw error;
+      setSelectedCreditNoteItems(data || []);
+      setViewModalOpen(true);
+    } catch (error) {
+      console.error('Error loading credit note items:', error);
+    }
+  };
+
   const loadInvoicesForCustomer = async (customerId: string) => {
     try {
       const { data, error } = await supabase
@@ -198,13 +225,49 @@ export function CreditNotes() {
     }
   };
 
-  const handleInvoiceChange = (invoiceId: string) => {
+  const handleInvoiceChange = async (invoiceId: string) => {
     const invoice = invoices.find(inv => inv.id === invoiceId);
     setFormData({
       ...formData,
       original_invoice_id: invoiceId,
       original_invoice_number: invoice?.invoice_number || '',
     });
+
+    if (invoiceId) {
+      await loadInvoiceItems(invoiceId);
+    } else {
+      setItems([{ product_id: '', batch_id: '', quantity: 0, unit_price: 0 }]);
+    }
+  };
+
+  const loadInvoiceItems = async (invoiceId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('sales_invoice_items')
+        .select(`
+          product_id,
+          batch_id,
+          quantity,
+          unit_price,
+          products(product_name, product_code),
+          batches(batch_number, current_stock)
+        `)
+        .eq('invoice_id', invoiceId);
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const invoiceItems = data.map(item => ({
+          product_id: item.product_id,
+          batch_id: item.batch_id || '',
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+        }));
+        setItems(invoiceItems);
+      }
+    } catch (error) {
+      console.error('Error loading invoice items:', error);
+    }
   };
 
   const addItem = () => {
@@ -399,10 +462,7 @@ export function CreditNotes() {
           actions={canManage ? (creditNote) => (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => {
-                  setSelectedCreditNote(creditNote);
-                  setViewModalOpen(true);
-                }}
+                onClick={() => handleViewCreditNote(creditNote)}
                 className="p-1 text-blue-600 hover:bg-blue-50 rounded"
                 title="View Credit Note"
               >
@@ -512,13 +572,15 @@ export function CreditNotes() {
             <div className="border-t pt-4">
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-sm font-semibold text-gray-900">Items Being Credited</h4>
-                <button
-                  type="button"
-                  onClick={addItem}
-                  className="text-sm text-red-600 hover:text-red-700 font-medium"
-                >
-                  + Add Item
-                </button>
+                {!formData.original_invoice_id && (
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="text-sm text-red-600 hover:text-red-700 font-medium"
+                  >
+                    + Add Item
+                  </button>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -530,7 +592,8 @@ export function CreditNotes() {
                           value={item.product_id}
                           onChange={(e) => updateItem(index, 'product_id', e.target.value)}
                           required
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                          disabled={!!formData.original_invoice_id}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg disabled:bg-gray-100"
                         >
                           <option value="">Select Product</option>
                           {products.map((product) => (
@@ -539,6 +602,11 @@ export function CreditNotes() {
                             </option>
                           ))}
                         </select>
+                        {item.product_id && products.find(p => p.id === item.product_id) && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {products.find(p => p.id === item.product_id)?.product_name}
+                          </div>
+                        )}
                       </div>
 
                       <div>
@@ -546,7 +614,7 @@ export function CreditNotes() {
                           value={item.batch_id}
                           onChange={(e) => updateItem(index, 'batch_id', e.target.value)}
                           required
-                          disabled={!item.product_id}
+                          disabled={!item.product_id || !!formData.original_invoice_id}
                           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg disabled:bg-gray-100"
                         >
                           <option value="">Select Batch</option>
@@ -651,6 +719,18 @@ export function CreditNotes() {
             </div>
           </form>
         </Modal>
+
+        {viewModalOpen && selectedCreditNote && (
+          <CreditNoteView
+            creditNote={selectedCreditNote}
+            items={selectedCreditNoteItems}
+            onClose={() => {
+              setViewModalOpen(false);
+              setSelectedCreditNote(null);
+              setSelectedCreditNoteItems([]);
+            }}
+          />
+        )}
       </div>
     </Layout>
   );
