@@ -3,9 +3,10 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Layout } from '../components/Layout';
-import { Plus, Eye, Trash2, PackageX, AlertTriangle, Edit } from 'lucide-react';
+import { Plus, Eye, Trash2, PackageX, AlertTriangle, Edit, CheckCircle, XCircle } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { DataTable } from '../components/DataTable';
+import { MaterialReturnView } from '../components/MaterialReturnView';
 
 interface MaterialReturn {
   id: string;
@@ -69,6 +70,9 @@ export default function MaterialReturns() {
   const [returns, setReturns] = useState<MaterialReturn[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [selectedReturn, setSelectedReturn] = useState<any>(null);
+  const [selectedReturnItems, setSelectedReturnItems] = useState<any[]>([]);
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [deliveryChallans, setDeliveryChallans] = useState<DeliveryChallan[]>([]);
@@ -95,7 +99,7 @@ export default function MaterialReturns() {
         .from('material_returns')
         .select(`
           *,
-          customers(company_name),
+          customers(company_name, address, city, phone),
           delivery_challans(challan_number)
         `)
         .order('created_at', { ascending: false });
@@ -280,6 +284,73 @@ export default function MaterialReturns() {
     }
   };
 
+  const handleView = async (materialReturn: MaterialReturn) => {
+    try {
+      const { data, error } = await supabase
+        .from('material_return_items')
+        .select(`
+          *,
+          products(product_name, product_code),
+          batches(batch_number)
+        `)
+        .eq('return_id', materialReturn.id);
+
+      if (error) throw error;
+
+      setSelectedReturn(materialReturn);
+      setSelectedReturnItems(data || []);
+      setViewModalOpen(true);
+    } catch (error) {
+      console.error('Error loading return items:', error);
+      alert('Failed to load return details');
+    }
+  };
+
+  const handleApprove = async (id: string) => {
+    if (!confirm('Approve this material return? Stock will be added back to inventory based on disposition.')) return;
+
+    try {
+      const { error } = await supabase
+        .from('material_returns')
+        .update({
+          status: 'approved',
+          approved_by: user?.id,
+          restocked: true,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      alert('Material return approved successfully');
+      loadReturns();
+    } catch (error: any) {
+      console.error('Error approving return:', error);
+      alert(error.message || 'Failed to approve material return');
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    const reason = prompt('Enter reason for rejection:');
+    if (!reason) return;
+
+    try {
+      const { error } = await supabase
+        .from('material_returns')
+        .update({
+          status: 'rejected',
+          approved_by: user?.id,
+          notes: reason,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      alert('Material return rejected');
+      loadReturns();
+    } catch (error: any) {
+      console.error('Error rejecting return:', error);
+      alert(error.message || 'Failed to reject material return');
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this material return?')) return;
 
@@ -312,6 +383,7 @@ export default function MaterialReturns() {
   };
 
   const canManage = profile?.role === 'admin' || profile?.role === 'sales' || profile?.role === 'manager';
+  const isManager = profile?.role === 'admin' || profile?.role === 'manager';
 
   const columns = [
     {
@@ -389,17 +461,46 @@ export default function MaterialReturns() {
           columns={columns}
           data={returns}
           loading={loading}
-          actions={canManage ? (ret) => (
+          actions={(ret) => (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => handleDelete(ret.id)}
-                className="p-1 text-red-600 hover:bg-red-50 rounded"
-                title="Delete Return"
+                onClick={() => handleView(ret)}
+                className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                title="View Return"
               >
-                <Trash2 className="w-4 h-4" />
+                <Eye className="w-4 h-4" />
               </button>
+
+              {isManager && ret.status === 'pending_approval' && (
+                <>
+                  <button
+                    onClick={() => handleApprove(ret.id)}
+                    className="p-1 text-green-600 hover:bg-green-50 rounded"
+                    title="Approve Return"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleReject(ret.id)}
+                    className="p-1 text-red-600 hover:bg-red-50 rounded"
+                    title="Reject Return"
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+
+              {canManage && ret.status === 'pending_approval' && (
+                <button
+                  onClick={() => handleDelete(ret.id)}
+                  className="p-1 text-red-600 hover:bg-red-50 rounded"
+                  title="Delete Return"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
-          ) : undefined}
+          )}
         />
 
         <Modal
@@ -668,6 +769,18 @@ export default function MaterialReturns() {
             </div>
           </form>
         </Modal>
+
+        {viewModalOpen && selectedReturn && (
+          <MaterialReturnView
+            materialReturn={selectedReturn}
+            items={selectedReturnItems}
+            onClose={() => {
+              setViewModalOpen(false);
+              setSelectedReturn(null);
+              setSelectedReturnItems([]);
+            }}
+          />
+        )}
       </div>
     </Layout>
   );

@@ -6,7 +6,7 @@ import { CreditNoteView } from '../components/CreditNoteView';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Plus, Eye, Trash2, FileX, AlertCircle } from 'lucide-react';
+import { Plus, Eye, Trash2, FileX, AlertCircle, CheckCircle, XCircle } from 'lucide-react';
 
 interface CreditNote {
   id: string;
@@ -21,6 +21,8 @@ interface CreditNote {
   subtotal: number;
   tax_amount: number;
   total_amount: number;
+  status?: string;
+  approved_by?: string;
   customers?: {
     company_name: string;
     address: string;
@@ -349,6 +351,50 @@ export function CreditNotes() {
     }
   };
 
+  const handleApprove = async (id: string) => {
+    if (!confirm('Approve this credit note? Stock will be adjusted accordingly.')) return;
+
+    try {
+      const { error } = await supabase
+        .from('credit_notes')
+        .update({
+          status: 'approved',
+          approved_by: user?.id,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      alert('Credit note approved successfully');
+      loadData();
+    } catch (error: any) {
+      console.error('Error approving credit note:', error);
+      alert(error.message || 'Failed to approve credit note');
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    const reason = prompt('Enter reason for rejection:');
+    if (!reason) return;
+
+    try {
+      const { error } = await supabase
+        .from('credit_notes')
+        .update({
+          status: 'rejected',
+          approved_by: user?.id,
+          notes: reason,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      alert('Credit note rejected');
+      loadData();
+    } catch (error: any) {
+      console.error('Error rejecting credit note:', error);
+      alert(error.message || 'Failed to reject credit note');
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this credit note? This will reverse the stock adjustment.')) {
       return;
@@ -385,6 +431,7 @@ export function CreditNotes() {
   };
 
   const canManage = profile?.role === 'admin' || profile?.role === 'sales' || profile?.role === 'manager';
+  const isManager = profile?.role === 'admin' || profile?.role === 'manager';
 
   const columns = [
     {
@@ -411,6 +458,19 @@ export function CreditNotes() {
       key: 'total_amount',
       label: 'Amount',
       render: (cn: CreditNote) => `${cn.currency} ${cn.total_amount.toLocaleString('id-ID', { minimumFractionDigits: 2 })}`
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      render: (cn: CreditNote) => (
+        <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
+          cn.status === 'approved' ? 'bg-green-100 text-green-800' :
+          cn.status === 'rejected' ? 'bg-red-100 text-red-800' :
+          'bg-yellow-100 text-yellow-800'
+        }`}>
+          {cn.status?.replace('_', ' ') || 'pending approval'}
+        </span>
+      )
     },
     {
       key: 'reason',
@@ -459,7 +519,7 @@ export function CreditNotes() {
           columns={columns}
           data={creditNotes}
           loading={loading}
-          actions={canManage ? (creditNote) => (
+          actions={(creditNote) => (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => handleViewCreditNote(creditNote)}
@@ -468,15 +528,37 @@ export function CreditNotes() {
               >
                 <Eye className="w-4 h-4" />
               </button>
-              <button
-                onClick={() => handleDelete(creditNote.id)}
-                className="p-1 text-red-600 hover:bg-red-50 rounded"
-                title="Delete Credit Note"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+
+              {isManager && (!creditNote.status || creditNote.status === 'pending_approval') && (
+                <>
+                  <button
+                    onClick={() => handleApprove(creditNote.id)}
+                    className="p-1 text-green-600 hover:bg-green-50 rounded"
+                    title="Approve Credit Note"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleReject(creditNote.id)}
+                    className="p-1 text-red-600 hover:bg-red-50 rounded"
+                    title="Reject Credit Note"
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+
+              {canManage && (!creditNote.status || creditNote.status === 'pending_approval') && (
+                <button
+                  onClick={() => handleDelete(creditNote.id)}
+                  className="p-1 text-red-600 hover:bg-red-50 rounded"
+                  title="Delete Credit Note"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
-          ) : undefined}
+          )}
         />
 
         <Modal
