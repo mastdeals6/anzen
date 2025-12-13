@@ -6,6 +6,8 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Plus, TrendingUp, TrendingDown, RefreshCw, RotateCcw, AlertTriangle, Package, CheckCircle, XCircle, Upload } from 'lucide-react';
+import MaterialReturns from './MaterialReturns';
+import StockRejections from './StockRejections';
 
 type TabType = 'transactions' | 'returns' | 'rejections';
 
@@ -560,17 +562,17 @@ export function Inventory() {
             <h1 className="text-3xl font-bold text-gray-900">Inventory Management</h1>
             <p className="text-gray-600 mt-1">Track transactions, returns, and rejections</p>
           </div>
-          {canManage && (
+          {canManage && activeTab === 'transactions' && (
             <button
               onClick={() => {
                 resetForm();
-                setModalType(activeTab === 'transactions' ? 'transaction' : activeTab === 'returns' ? 'return' : 'rejection');
+                setModalType('transaction');
                 setModalOpen(true);
               }}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
             >
               <Plus className="w-5 h-5" />
-              {activeTab === 'transactions' ? 'Add Transaction' : activeTab === 'returns' ? 'Create Return' : 'Report Rejection'}
+              Add Transaction
             </button>
           )}
         </div>
@@ -618,11 +620,11 @@ export function Inventory() {
         )}
 
         {activeTab === 'returns' && (
-          <DataTable columns={returnColumns} data={returns} loading={loading} />
+          <MaterialReturns />
         )}
 
         {activeTab === 'rejections' && (
-          <DataTable columns={rejectionColumns} data={rejections} loading={loading} />
+          <StockRejections />
         )}
 
         <Modal

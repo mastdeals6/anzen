@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Layout } from '../components/Layout';
 import { Plus, Eye, Trash2, PackageX, AlertTriangle, Edit, CheckCircle, XCircle } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { DataTable } from '../components/DataTable';
@@ -539,36 +538,35 @@ export default function MaterialReturns() {
   ];
 
   return (
-    <Layout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Material Returns</h1>
-            <p className="text-gray-600 mt-1">Manage physical returns before invoicing</p>
-          </div>
-          {canManage && (
-            <button
-              onClick={() => {
-                resetForm();
-                setModalOpen(true);
-              }}
-              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
-            >
-              <Plus className="w-5 h-5" />
-              Create Material Return
-            </button>
-          )}
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Material Returns</h1>
+          <p className="text-gray-600 mt-1">Manage physical returns before invoicing</p>
         </div>
+        {canManage && (
+          <button
+            onClick={() => {
+              resetForm();
+              setModalOpen(true);
+            }}
+            className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
+          >
+            <Plus className="w-5 h-5" />
+            Create Material Return
+          </button>
+        )}
+      </div>
 
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex gap-3">
-          <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-yellow-800">
-            <p className="font-medium">Material Returns vs Credit Notes:</p>
-            <p className="mt-1">Use Material Returns for physical goods returned BEFORE invoice is made (e.g., DC 100kg → return 20kg). For returns AFTER invoice filing, use Credit Notes.</p>
-          </div>
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex gap-3">
+        <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+        <div className="text-sm text-yellow-800">
+          <p className="font-medium">Material Returns vs Credit Notes:</p>
+          <p className="mt-1">Use Material Returns for physical goods returned BEFORE invoice is made (e.g., DC 100kg → return 20kg). For returns AFTER invoice filing, use Credit Notes.</p>
         </div>
+      </div>
 
-        <DataTable
+      <DataTable
           columns={columns}
           data={returns}
           loading={loading}
@@ -622,18 +620,18 @@ export default function MaterialReturns() {
               )}
             </div>
           )}
-        />
+      />
 
-        <Modal
-          isOpen={modalOpen}
-          onClose={() => {
-            setModalOpen(false);
-            resetForm();
-          }}
-          title={editMode ? "Edit Material Return" : "Create Material Return"}
-          size="xl"
-        >
-          <form onSubmit={handleSubmit} className="space-y-6">
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => {
+          setModalOpen(false);
+          resetForm();
+        }}
+        title={editMode ? "Edit Material Return" : "Create Material Return"}
+        size="xl"
+      >
+        <form onSubmit={handleSubmit} className="space-y-6">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-start gap-3">
                 <PackageX className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -887,22 +885,21 @@ export default function MaterialReturns() {
               >
                 {editMode ? 'Update Material Return' : 'Create Material Return'}
               </button>
-            </div>
-          </form>
-        </Modal>
+          </div>
+        </form>
+      </Modal>
 
-        {viewModalOpen && selectedReturn && (
-          <MaterialReturnView
-            materialReturn={selectedReturn}
-            items={selectedReturnItems}
-            onClose={() => {
-              setViewModalOpen(false);
-              setSelectedReturn(null);
-              setSelectedReturnItems([]);
-            }}
-          />
-        )}
-      </div>
-    </Layout>
+      {viewModalOpen && selectedReturn && (
+        <MaterialReturnView
+          materialReturn={selectedReturn}
+          items={selectedReturnItems}
+          onClose={() => {
+            setViewModalOpen(false);
+            setSelectedReturn(null);
+            setSelectedReturnItems([]);
+          }}
+        />
+      )}
+    </div>
   );
 }
