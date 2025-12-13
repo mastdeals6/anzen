@@ -1232,7 +1232,7 @@ export function DeliveryChallan() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs text-gray-600 mb-1">Total Qty</label>
+                            <label className="block text-xs text-gray-600 mb-1">Total Qty (Kg)</label>
                             <input
                               type="text"
                               value={`${item.quantity} kg`}

@@ -711,10 +711,11 @@ export function CreditNotes() {
                       </div>
 
                       <div>
+                        <label className="block text-xs text-gray-600 mb-1">Quantity (Kg)</label>
                         <input
                           type="number"
                           step="0.001"
-                          placeholder="Quantity"
+                          placeholder="Quantity in Kg"
                           value={item.quantity || ''}
                           onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
                           required
@@ -724,10 +725,11 @@ export function CreditNotes() {
                       </div>
 
                       <div>
+                        <label className="block text-xs text-gray-600 mb-1">Unit Price (per Kg)</label>
                         <input
                           type="number"
                           step="0.01"
-                          placeholder="Unit Price"
+                          placeholder="Price per Kg"
                           value={item.unit_price || ''}
                           onChange={(e) => updateItem(index, 'unit_price', parseFloat(e.target.value) || 0)}
                           required

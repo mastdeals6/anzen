@@ -650,21 +650,21 @@ export default function MaterialReturns() {
                           </div>
 
                           <div className="col-span-2">
-                            <label className="block text-xs text-gray-600 mb-1">Dispatched Qty</label>
+                            <label className="block text-xs text-gray-600 mb-1">Dispatched Qty (Kg)</label>
                             <div className="text-sm font-medium text-blue-600">
-                              {item.quantity}
+                              {item.quantity} Kg
                             </div>
                           </div>
 
                           <div className="col-span-1">
-                            <label className="block text-xs text-gray-600 mb-1">Unit Price</label>
+                            <label className="block text-xs text-gray-600 mb-1">Unit Price (per Kg)</label>
                             <div className="text-sm font-medium text-gray-900">
                               {returnItem.unit_price.toLocaleString()}
                             </div>
                           </div>
 
                           <div className="col-span-2">
-                            <label className="block text-xs text-gray-600 mb-1">Return Qty *</label>
+                            <label className="block text-xs text-gray-600 mb-1">Return Qty (Kg) *</label>
                             <input
                               type="number"
                               step="0.01"
@@ -673,7 +673,7 @@ export default function MaterialReturns() {
                               max={item.quantity}
                               min="0"
                               className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500"
-                              placeholder="0"
+                              placeholder="Enter Kg"
                             />
                             {returnItem.quantity_returned > item.quantity && (
                               <p className="text-xs text-red-600 mt-1">Cannot exceed {item.quantity}</p>
