@@ -108,6 +108,8 @@ interface Batch {
   duty_charges: number;
   freight_charges: number;
   other_charges: number;
+  selling_price?: number;
+  mrp?: number;
 }
 
 interface DeliveryChallan {
@@ -184,7 +186,7 @@ export function Sales() {
   }, [navigationData]);
 
   useEffect(() => {
-    if (selectedDCIds.length > 0 && formData.customer_id) {
+    if (selectedDCIds.length > 0 && formData.customer_id && !editingInvoice) {
       loadItemsFromSelectedDCs();
     }
   }, [selectedDCIds]);
@@ -199,20 +201,28 @@ export function Sales() {
 
       if (error) throw error;
 
-      const dcItems = (data || []).map((item: any) => ({
-        product_id: item.product_id,
-        batch_id: item.batch_id,
-        quantity: item.remaining_quantity,
-        unit_price: 0,
-        tax_rate: 11,
-        total: 0,
-        delivery_challan_item_id: item.dc_item_id,
-        dc_number: item.challan_number,
-        max_quantity: item.remaining_quantity,
+      const dcItems = await Promise.all((data || []).map(async (item: any) => {
+        const batch = batches.find(b => b.id === item.batch_id);
+        const sellingPrice = batch?.selling_price || 0;
+
+        return {
+          product_id: item.product_id,
+          batch_id: item.batch_id,
+          quantity: item.remaining_quantity,
+          unit_price: sellingPrice,
+          tax_rate: 11,
+          total: 0,
+          delivery_challan_item_id: item.dc_item_id,
+          dc_number: item.challan_number,
+          max_quantity: item.remaining_quantity,
+        };
       }));
 
       if (dcItems.length > 0) {
-        setItems(dcItems);
+        setItems(dcItems.map(item => ({
+          ...item,
+          total: calculateItemTotal(item)
+        })));
       } else {
         setItems([{
           product_id: '',
@@ -338,7 +348,7 @@ export function Sales() {
       // Load ALL batches for reference (including 0 stock for delivery challan invoices)
       const { data, error } = await supabase
         .from('batches')
-        .select('id, batch_number, product_id, current_stock, import_price, duty_charges, freight_charges, other_charges, import_quantity, import_date, expiry_date')
+        .select('id, batch_number, product_id, current_stock, import_price, duty_charges, freight_charges, other_charges, import_quantity, import_date, expiry_date, selling_price, mrp')
         .eq('is_active', true)
         .order('import_date', { ascending: true });
 
@@ -1233,6 +1243,23 @@ export function Sales() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Delivery Challans
+                    </label>
+                    <DCMultiSelect
+                      options={pendingDCOptions}
+                      selectedDCIds={selectedDCIds}
+                      onChange={setSelectedDCIds}
+                      placeholder="Select Delivery Challans"
+                    />
+                    {selectedDCIds.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {selectedDCIds.length} DC(s) selected - items will be auto-loaded below
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Notes
                     </label>
                     <textarea
@@ -1280,23 +1307,6 @@ export function Sales() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                       placeholder="Customer PO Number"
                     />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Delivery Challans
-                    </label>
-                    <DCMultiSelect
-                      options={pendingDCOptions}
-                      selectedDCIds={selectedDCIds}
-                      onChange={setSelectedDCIds}
-                      placeholder="Select Delivery Challans"
-                    />
-                    {selectedDCIds.length > 0 && (
-                      <p className="mt-1 text-xs text-gray-500">
-                        {selectedDCIds.length} DC(s) selected - items will be auto-loaded below
-                      </p>
-                    )}
                   </div>
 
                   <div>
