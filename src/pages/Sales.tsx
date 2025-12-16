@@ -868,6 +868,8 @@ export function Sales() {
 
     const loadedItems = await loadInvoiceItems(invoice.id);
 
+    const newSelectedDCItems = new Map<string, any>();
+
     if (loadedItems.length > 0) {
       setItems(loadedItems.map(item => ({
         product_id: item.product_id,
@@ -879,8 +881,21 @@ export function Sales() {
         delivery_challan_item_id: item.delivery_challan_item_id,
         dc_number: item.dc_number,
       })));
+
+      loadedItems.forEach(item => {
+        if (item.delivery_challan_item_id) {
+          newSelectedDCItems.set(item.delivery_challan_item_id, {
+            dc_item_id: item.delivery_challan_item_id,
+            product_id: item.product_id,
+            batch_id: item.batch_id,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+          });
+        }
+      });
     }
 
+    setSelectedDCItems(newSelectedDCItems);
     setModalOpen(true);
   };
 
@@ -1168,39 +1183,6 @@ export function Sales() {
                       ))}
                     </select>
                   </div>
-
-                  {(() => {
-                    const linkedDCs = new Set<string>();
-                    items.forEach(item => {
-                      if (item.dc_number) {
-                        linkedDCs.add(item.dc_number);
-                      }
-                    });
-
-                    if (linkedDCs.size > 0) {
-                      return (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Linked Delivery Challans
-                          </label>
-                          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                            <div className="flex flex-wrap gap-2">
-                              {Array.from(linkedDCs).map(dcNumber => (
-                                <span key={dcNumber} className="inline-flex items-center px-2.5 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                                  {dcNumber}
-                                </span>
-                              ))}
-                            </div>
-                            <p className="text-xs text-blue-600 mt-2">
-                              This invoice includes items from the above delivery challan(s)
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return null;
-                  })()}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
