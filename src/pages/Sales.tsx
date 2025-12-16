@@ -926,16 +926,22 @@ export function Sales() {
     const loadedItems = await loadInvoiceItems(invoice.id);
 
     if (loadedItems.length > 0) {
-      setItems(loadedItems.map(item => ({
-        product_id: item.product_id,
-        batch_id: item.batch_id,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        tax_rate: item.tax_rate,
-        total: item.total,
-        delivery_challan_item_id: item.delivery_challan_item_id,
-        dc_number: item.dc_number,
-      })));
+      setItems(loadedItems.map(item => {
+        const mappedItem = {
+          product_id: item.product_id,
+          batch_id: item.batch_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          tax_rate: item.tax_rate,
+          total: 0,
+          delivery_challan_item_id: item.delivery_challan_item_id,
+          dc_number: item.dc_number,
+        };
+        return {
+          ...mappedItem,
+          total: calculateItemTotal(mappedItem)
+        };
+      }));
     }
 
     await loadPendingDCOptions(invoice.customer_id);
@@ -1165,180 +1171,144 @@ export function Sales() {
           title={editingInvoice ? "Edit Sales Invoice" : "Create Sales Invoice"}
           size="xl"
         >
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-              <h4 className="text-sm font-semibold text-gray-900 mb-4">Invoice Details</h4>
-              <div className="grid grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Invoice Number *
-                  </label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Invoice No *</label>
                   <input
                     type="text"
                     value={formData.invoice_number}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-gray-100"
                     required
-                    placeholder="INV-001"
                     readOnly
                     disabled
                   />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Invoice Date *
-                  </label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Invoice Date *</label>
                   <input
                     type="date"
                     value={formData.invoice_date}
                     onChange={(e) => setFormData({ ...formData, invoice_date: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
                     required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Payment Terms *</label>
+                  <select
+                    value={formData.payment_terms}
+                    onChange={(e) => setFormData({ ...formData, payment_terms: e.target.value })}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="0">Immediate</option>
+                    <option value="15">15 Days</option>
+                    <option value="30">30 Days</option>
+                    <option value="45">45 Days</option>
+                    <option value="60">60 Days</option>
+                    <option value="advance">Advance</option>
+                    <option value="50-50">50% Adv & 50% on Delivery</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Customer *</label>
+                  <select
+                    value={formData.customer_id}
+                    onChange={(e) => {
+                      const customerId = e.target.value;
+                      setFormData({ ...formData, customer_id: customerId });
+                      setSelectedChallanId('');
+                      setPendingChallans([]);
+                      setSelectedDCIds([]);
+                      setItems([{
+                        product_id: '',
+                        batch_id: null,
+                        quantity: 1,
+                        unit_price: 0,
+                        tax_rate: 11,
+                        total: 0,
+                      }]);
+                      if (customerId) {
+                        loadPendingDCOptions(customerId);
+                      } else {
+                        setPendingDCOptions([]);
+                      }
+                    }}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="">Select Customer</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.company_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Delivery Challans</label>
+                  <DCMultiSelect
+                    options={pendingDCOptions}
+                    selectedDCIds={selectedDCIds}
+                    onChange={setSelectedDCIds}
+                    placeholder="Select DCs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">PO Number</label>
+                  <input
+                    type="text"
+                    value={formData.po_number}
+                    onChange={(e) => setFormData({ ...formData, po_number: e.target.value })}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    placeholder="Customer PO Number"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+                  <input
+                    type="text"
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    placeholder="Additional notes"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Discount (Rp)</label>
+                  <input
+                    type="number"
+                    value={formData.discount === 0 ? '' : formData.discount}
+                    onChange={(e) => setFormData({ ...formData, discount: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500"
+                    min="0"
+                    placeholder="0"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
-              <div className="border-r border-gray-200 pr-6">
-                <h4 className="text-sm font-semibold text-gray-900 mb-4">Customer Information</h4>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Customer *
-                    </label>
-                    <select
-                      value={formData.customer_id}
-                      onChange={(e) => {
-                        const customerId = e.target.value;
-                        setFormData({ ...formData, customer_id: customerId });
-                        setSelectedChallanId('');
-                        setPendingChallans([]);
-                        setSelectedDCIds([]);
-                        setItems([{
-                          product_id: '',
-                          batch_id: null,
-                          quantity: 1,
-                          unit_price: 0,
-                          tax_rate: 11,
-                          total: 0,
-                        }]);
-                        if (customerId) {
-                          loadPendingDCOptions(customerId);
-                        } else {
-                          setPendingDCOptions([]);
-                        }
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="">Select Customer</option>
-                      {customers.map((customer) => (
-                        <option key={customer.id} value={customer.id}>
-                          {customer.company_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Delivery Challans
-                    </label>
-                    <DCMultiSelect
-                      options={pendingDCOptions}
-                      selectedDCIds={selectedDCIds}
-                      onChange={setSelectedDCIds}
-                      placeholder="Select Delivery Challans"
-                    />
-                    {selectedDCIds.length > 0 && (
-                      <p className="mt-1 text-xs text-gray-500">
-                        {selectedDCIds.length} DC(s) selected - items will be auto-loaded below
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Notes
-                    </label>
-                    <textarea
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      rows={3}
-                      placeholder="Additional notes for invoice"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="pl-6">
-                <h4 className="text-sm font-semibold text-gray-900 mb-4">Payment Terms</h4>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Payment Terms *
-                    </label>
-                    <select
-                      value={formData.payment_terms}
-                      onChange={(e) => setFormData({ ...formData, payment_terms: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="0">Immediate</option>
-                      <option value="15">15 Days</option>
-                      <option value="30">30 Days</option>
-                      <option value="45">45 Days</option>
-                      <option value="60">60 Days</option>
-                      <option value="advance">Advance</option>
-                      <option value="50-50">50% Adv & 50% on Delivery</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      PO Number
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.po_number}
-                      onChange={(e) => setFormData({ ...formData, po_number: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      placeholder="Customer PO Number"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Discount (Rp)
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.discount === 0 ? '' : formData.discount}
-                      onChange={(e) => setFormData({ ...formData, discount: e.target.value === '' ? 0 : Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      min="0"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-sm font-semibold text-gray-900">Line Items</h4>
+            <div className="border-t pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold text-gray-900">Line Items</h4>
                 <button
                   type="button"
                   onClick={addManualItem}
-                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
                 >
                   + Add Manual Item
                 </button>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-1.5">
                 {items.map((item, index) => {
                   const availableBatches = batches.filter(b => b.product_id === item.product_id);
                   const costPerUnit = getBatchCostPerUnit(item.batch_id);
@@ -1348,20 +1318,20 @@ export function Sales() {
                   const isFromDC = !!item.delivery_challan_item_id;
 
                   return (
-                    <div key={index} className="p-3 bg-gray-50 rounded-lg space-y-2 border-l-4" style={{ borderLeftColor: isFromDC ? '#3b82f6' : '#10b981' }}>
-                      <div className="flex items-center justify-between mb-2">
+                    <div key={index} className="p-2 bg-gray-50 rounded space-y-1 border-l-2" style={{ borderLeftColor: isFromDC ? '#3b82f6' : '#10b981' }}>
+                      <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-2">
                           {isFromDC ? (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                            <span className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 rounded">
                               From DC: {item.dc_number}
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                            <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 text-green-700 rounded">
                               Manual Item
                             </span>
                           )}
                           {isFromDC && item.max_quantity && (
-                            <span className="text-xs text-gray-500">
+                            <span className="text-[10px] text-gray-500">
                               Max: {item.max_quantity} units
                             </span>
                           )}
@@ -1372,7 +1342,7 @@ export function Sales() {
                             onClick={() => removeItem(index)}
                             className="text-red-600 hover:text-red-700"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         )}
                       </div>
@@ -1481,18 +1451,18 @@ export function Sales() {
                       </div>
 
                       {item.batch_id && costPerUnit > 0 && (
-                        <div className="flex items-center gap-4 text-xs p-2 bg-white rounded border border-gray-200">
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 text-[10px] px-2 py-1 bg-white rounded border border-gray-200">
+                          <div className="flex items-center gap-1">
                             <span className="text-gray-600">Cost/Unit:</span>
                             <span className="font-semibold text-gray-900">Rp {costPerUnit.toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span>
                           </div>
-                          <div className="h-4 w-px bg-gray-300" />
-                          <div className="flex items-center gap-2">
+                          <div className="h-3 w-px bg-gray-300" />
+                          <div className="flex items-center gap-1">
                             <span className="text-gray-600">Suggested Price (25%):</span>
                             <span className="font-semibold text-blue-600">Rp {suggestedPrice.toLocaleString('id-ID')}</span>
                           </div>
-                          <div className="h-4 w-px bg-gray-300" />
-                          <div className="flex items-center gap-2">
+                          <div className="h-3 w-px bg-gray-300" />
+                          <div className="flex items-center gap-1">
                             <span className="text-gray-600">Current Margin:</span>
                             <span className={`font-semibold ${
                               margin >= 20 ? 'text-green-600' :
@@ -1502,8 +1472,8 @@ export function Sales() {
                               {margin.toFixed(1)}%
                             </span>
                           </div>
-                          <div className="h-4 w-px bg-gray-300" />
-                          <div className="flex items-center gap-2">
+                          <div className="h-3 w-px bg-gray-300" />
+                          <div className="flex items-center gap-1">
                             <span className="text-gray-600">Profit/Unit:</span>
                             <span className={`font-semibold ${
                               item.unit_price > costPerUnit ? 'text-green-600' : 'text-red-600'
@@ -1518,8 +1488,8 @@ export function Sales() {
                 })}
               </div>
 
-              <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                <div className="space-y-2 text-sm">
+              <div className="mt-2 p-2 bg-blue-50 rounded">
+                <div className="space-y-1 text-xs">
                   <div className="flex justify-between">
                     <span>Subtotal:</span>
                     <span className="font-medium">Rp {calculateTotals().subtotal.toLocaleString('id-ID')}</span>
@@ -1532,7 +1502,7 @@ export function Sales() {
                     <span>Discount:</span>
                     <span className="font-medium">-Rp {formData.discount.toLocaleString('id-ID')}</span>
                   </div>
-                  <div className="flex justify-between text-base font-bold border-t pt-2">
+                  <div className="flex justify-between text-sm font-bold border-t pt-1">
                     <span>Total:</span>
                     <span className="text-blue-600">Rp {calculateTotals().total.toLocaleString('id-ID')}</span>
                   </div>
@@ -1540,22 +1510,22 @@ export function Sales() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-6 border-t">
+            <div className="flex justify-end gap-2 pt-3 border-t">
               <button
                 type="button"
                 onClick={() => {
                   setModalOpen(false);
                   resetForm();
                 }}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition"
               >
-                Create Invoice
+                {editingInvoice ? 'Update Invoice' : 'Create Invoice'}
               </button>
             </div>
           </form>
