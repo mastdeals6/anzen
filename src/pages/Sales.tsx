@@ -864,11 +864,7 @@ export function Sales() {
       notes: invoice.notes || '',
     });
 
-    await loadPendingDCItems(invoice.customer_id, invoice.id);
-
     const loadedItems = await loadInvoiceItems(invoice.id);
-
-    const newSelectedDCItems = new Map<string, any>();
 
     if (loadedItems.length > 0) {
       setItems(loadedItems.map(item => ({
@@ -881,21 +877,10 @@ export function Sales() {
         delivery_challan_item_id: item.delivery_challan_item_id,
         dc_number: item.dc_number,
       })));
-
-      loadedItems.forEach(item => {
-        if (item.delivery_challan_item_id) {
-          newSelectedDCItems.set(item.delivery_challan_item_id, {
-            dc_item_id: item.delivery_challan_item_id,
-            product_id: item.product_id,
-            batch_id: item.batch_id,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-          });
-        }
-      });
     }
 
-    setSelectedDCItems(newSelectedDCItems);
+    await loadPendingDCItems(invoice.customer_id, invoice.id);
+
     setModalOpen(true);
   };
 
