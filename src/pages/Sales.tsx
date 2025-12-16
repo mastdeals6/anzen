@@ -1238,7 +1238,7 @@ export function Sales() {
             </div>
 
             <div className="border-t pt-6">
-              {formData.customer_id && pendingDCsWithItems.length > 0 && (
+              {formData.customer_id && (
                 <div className="mb-6">
                   <DCItemSelector
                     pendingDCs={pendingDCsWithItems}
