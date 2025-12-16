@@ -3,7 +3,7 @@ import { Layout } from '../components/Layout';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { InvoiceView } from '../components/InvoiceView';
-import { DCItemSelector } from '../components/DCItemSelector';
+import { DCMultiSelect } from '../components/DCMultiSelect';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../contexts/NavigationContext';
@@ -141,9 +141,8 @@ export function Sales() {
   const [products, setProducts] = useState<Product[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [pendingChallans, setPendingChallans] = useState<DeliveryChallan[]>([]);
-  const [pendingDCsWithItems, setPendingDCsWithItems] = useState<DCWithItems[]>([]);
-  const [selectedDCItems, setSelectedDCItems] = useState<Map<string, SelectedDCItem>>(new Map());
-  const [expandedDCs, setExpandedDCs] = useState<Set<string>>(new Set());
+  const [pendingDCOptions, setPendingDCOptions] = useState<Array<{ challan_id: string; challan_number: string; challan_date: string; item_count: number }>>([]);
+  const [selectedDCIds, setSelectedDCIds] = useState<string[]>([]);
   const [selectedChallanId, setSelectedChallanId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -183,6 +182,51 @@ export function Sales() {
       clearNavigationData();
     }
   }, [navigationData]);
+
+  useEffect(() => {
+    if (selectedDCIds.length > 0 && formData.customer_id) {
+      loadItemsFromSelectedDCs();
+    }
+  }, [selectedDCIds]);
+
+  const loadItemsFromSelectedDCs = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('pending_dc_items_by_customer')
+        .select('*')
+        .eq('customer_id', formData.customer_id)
+        .in('challan_id', selectedDCIds);
+
+      if (error) throw error;
+
+      const dcItems = (data || []).map((item: any) => ({
+        product_id: item.product_id,
+        batch_id: item.batch_id,
+        quantity: item.remaining_quantity,
+        unit_price: 0,
+        tax_rate: 11,
+        total: 0,
+        delivery_challan_item_id: item.dc_item_id,
+        dc_number: item.challan_number,
+        max_quantity: item.remaining_quantity,
+      }));
+
+      if (dcItems.length > 0) {
+        setItems(dcItems);
+      } else {
+        setItems([{
+          product_id: '',
+          batch_id: null,
+          quantity: 1,
+          unit_price: 0,
+          tax_rate: 11,
+          total: 0,
+        }]);
+      }
+    } catch (error) {
+      console.error('Error loading DC items:', error);
+    }
+  };
 
   const loadInvoices = async () => {
     try {
@@ -332,6 +376,31 @@ export function Sales() {
     } catch (error) {
       console.error('Error loading pending challans:', error);
       setPendingChallans([]);
+    }
+  };
+
+  const loadPendingDCOptions = async (customerId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('dc_invoicing_summary')
+        .select('challan_id, challan_number, challan_date, total_quantity, total_remaining_quantity')
+        .eq('customer_id', customerId)
+        .gt('total_remaining_quantity', 0)
+        .order('challan_date', { ascending: false });
+
+      if (error) throw error;
+
+      const options = (data || []).map(dc => ({
+        challan_id: dc.challan_id,
+        challan_number: dc.challan_number,
+        challan_date: dc.challan_date,
+        item_count: dc.total_remaining_quantity
+      }));
+
+      setPendingDCOptions(options);
+    } catch (error) {
+      console.error('Error loading pending DC options:', error);
+      setPendingDCOptions([]);
     }
   };
 
@@ -755,24 +824,14 @@ export function Sales() {
             invoice_date: formData.invoice_date,
             due_date: dueDate.toISOString().split('T')[0],
             discount_amount: formData.discount,
-            delivery_challan_number: formData.delivery_challan_number || null,
+            delivery_challan_number: null,
             po_number: formData.po_number || null,
             payment_terms_days: paymentTermsDays,
             notes: formData.notes || null,
             subtotal: totals.subtotal,
             tax_amount: totals.taxAmount,
             total_amount: totals.total,
-            linked_challan_ids: (() => {
-              const dcIds = new Set<string>();
-              pendingDCsWithItems.forEach(dc => {
-                dc.items.forEach(item => {
-                  if (selectedDCItems.has(item.dc_item_id)) {
-                    dcIds.add(dc.challan_id);
-                  }
-                });
-              });
-              return dcIds.size > 0 ? Array.from(dcIds) : null;
-            })(),
+            linked_challan_ids: selectedDCIds.length > 0 ? selectedDCIds : null,
           })
           .eq('id', editingInvoice.id)
           .select()
@@ -789,7 +848,7 @@ export function Sales() {
             invoice_date: formData.invoice_date,
             due_date: dueDate.toISOString().split('T')[0],
             discount_amount: formData.discount,
-            delivery_challan_number: formData.delivery_challan_number || null,
+            delivery_challan_number: null,
             po_number: formData.po_number || null,
             payment_terms_days: paymentTermsDays,
             notes: formData.notes || null,
@@ -798,17 +857,7 @@ export function Sales() {
             total_amount: totals.total,
             payment_status: 'pending',
             created_by: user.id,
-            linked_challan_ids: (() => {
-              const dcIds = new Set<string>();
-              pendingDCsWithItems.forEach(dc => {
-                dc.items.forEach(item => {
-                  if (selectedDCItems.has(item.dc_item_id)) {
-                    dcIds.add(dc.challan_id);
-                  }
-                });
-              });
-              return dcIds.size > 0 ? Array.from(dcIds) : null;
-            })(),
+            linked_challan_ids: selectedDCIds.length > 0 ? selectedDCIds : null,
           }])
           .select()
           .single();
@@ -879,7 +928,11 @@ export function Sales() {
       })));
     }
 
-    await loadPendingDCItems(invoice.customer_id, invoice.id);
+    await loadPendingDCOptions(invoice.customer_id);
+
+    if (invoice.linked_challan_ids && invoice.linked_challan_ids.length > 0) {
+      setSelectedDCIds(invoice.linked_challan_ids);
+    }
 
     setModalOpen(true);
   };
@@ -920,6 +973,8 @@ export function Sales() {
     setEditingInvoice(null);
     setSelectedChallanId('');
     setPendingChallans([]);
+    setPendingDCOptions([]);
+    setSelectedDCIds([]);
     setFormData({
       invoice_number: '',
       customer_id: '',
@@ -1149,12 +1204,19 @@ export function Sales() {
                         setFormData({ ...formData, customer_id: customerId });
                         setSelectedChallanId('');
                         setPendingChallans([]);
-                        setPendingDCsWithItems([]);
-                        setSelectedDCItems(new Map());
-                        setExpandedDCs(new Set());
+                        setSelectedDCIds([]);
+                        setItems([{
+                          product_id: '',
+                          batch_id: null,
+                          quantity: 1,
+                          unit_price: 0,
+                          tax_rate: 11,
+                          total: 0,
+                        }]);
                         if (customerId) {
-                          loadPendingChallans(customerId);
-                          loadPendingDCItems(customerId, editingInvoice?.id);
+                          loadPendingDCOptions(customerId);
+                        } else {
+                          setPendingDCOptions([]);
                         }
                       }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -1222,15 +1284,19 @@ export function Sales() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      DC Number
+                      Delivery Challans
                     </label>
-                    <input
-                      type="text"
-                      value={formData.delivery_challan_number}
-                      onChange={(e) => setFormData({ ...formData, delivery_challan_number: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      placeholder="Delivery Challan Number"
+                    <DCMultiSelect
+                      options={pendingDCOptions}
+                      selectedDCIds={selectedDCIds}
+                      onChange={setSelectedDCIds}
+                      placeholder="Select Delivery Challans"
                     />
+                    {selectedDCIds.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {selectedDCIds.length} DC(s) selected - items will be auto-loaded below
+                      </p>
+                    )}
                   </div>
 
                   <div>
