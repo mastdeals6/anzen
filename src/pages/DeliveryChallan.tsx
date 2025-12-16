@@ -19,6 +19,10 @@ interface DeliveryChallan {
   driver_name: string | null;
   notes: string | null;
   approval_status: 'pending_approval' | 'approved' | 'rejected';
+  invoicing_status?: 'not_invoiced' | 'partially_invoiced' | 'fully_invoiced';
+  total_items?: number;
+  invoiced_items?: number;
+  linked_invoices?: string[];
   customers?: {
     company_name: string;
     address: string;
@@ -175,7 +179,39 @@ export function DeliveryChallan() {
         .order('challan_date', { ascending: false });
 
       if (error) throw error;
-      setChallans(data || []);
+
+      const { data: invoicingData, error: invError } = await supabase
+        .from('dc_invoicing_summary')
+        .select('*');
+
+      if (invError) {
+        console.error('Error loading invoicing status:', invError);
+      }
+
+      const invStatusMap = new Map();
+      (invoicingData || []).forEach((inv: any) => {
+        invStatusMap.set(inv.challan_id, {
+          status: inv.dc_status,
+          total_items: inv.total_items,
+          not_invoiced_items: inv.not_invoiced_items,
+          partially_invoiced_items: inv.partially_invoiced_items,
+          fully_invoiced_items: inv.fully_invoiced_items,
+          linked_invoices: inv.linked_invoice_numbers || []
+        });
+      });
+
+      const challansWithStatus = (data || []).map(challan => {
+        const invStatus = invStatusMap.get(challan.id);
+        return {
+          ...challan,
+          invoicing_status: invStatus?.status || 'not_invoiced',
+          total_items: invStatus?.total_items || 0,
+          invoiced_items: invStatus?.fully_invoiced_items + invStatus?.partially_invoiced_items || 0,
+          linked_invoices: invStatus?.linked_invoices || []
+        };
+      });
+
+      setChallans(challansWithStatus);
     } catch (error) {
       console.error('Error loading challans:', error);
     } finally {
@@ -863,6 +899,40 @@ export function DeliveryChallan() {
             )}
             {challan.approval_status === 'rejected' && (
               <XCircle className="w-5 h-5 text-red-600 ml-2" title="Rejected" />
+            )}
+          </div>
+        );
+      }
+    },
+    {
+      key: 'invoicing_status',
+      label: 'Invoicing Status',
+      render: (challan: DeliveryChallan) => {
+        const statusColors = {
+          not_invoiced: 'bg-gray-100 text-gray-700',
+          partially_invoiced: 'bg-yellow-100 text-yellow-700',
+          fully_invoiced: 'bg-blue-100 text-blue-700'
+        };
+        const statusLabels = {
+          not_invoiced: 'Not Invoiced',
+          partially_invoiced: 'Partially Invoiced',
+          fully_invoiced: 'Fully Invoiced'
+        };
+        const status = challan.invoicing_status || 'not_invoiced';
+        return (
+          <div className="space-y-1">
+            <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${statusColors[status]}`}>
+              {statusLabels[status]}
+            </span>
+            {challan.total_items > 0 && (
+              <div className="text-xs text-gray-500">
+                {challan.invoiced_items || 0}/{challan.total_items} items invoiced
+              </div>
+            )}
+            {challan.linked_invoices && challan.linked_invoices.length > 0 && (
+              <div className="text-xs text-blue-600 font-medium">
+                {challan.linked_invoices.join(', ')}
+              </div>
             )}
           </div>
         );

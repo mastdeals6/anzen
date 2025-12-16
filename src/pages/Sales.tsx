@@ -3,6 +3,7 @@ import { Layout } from '../components/Layout';
 import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { InvoiceView } from '../components/InvoiceView';
+import { DCItemSelector } from '../components/DCItemSelector';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '../contexts/NavigationContext';
@@ -41,6 +42,9 @@ interface InvoiceItem {
   unit_price: number;
   tax_rate: number;
   total: number;
+  delivery_challan_item_id?: string | null;
+  dc_number?: string;
+  max_quantity?: number;
   products?: {
     product_name: string;
     product_code: string;
@@ -48,6 +52,39 @@ interface InvoiceItem {
   batches?: {
     batch_number: string;
   } | null;
+}
+
+interface DCItem {
+  dc_item_id: string;
+  product_id: string;
+  product_name: string;
+  batch_id: string;
+  batch_number: string;
+  unit: string;
+  pack_size: number;
+  pack_type: string;
+  number_of_packs: number;
+  original_quantity: number;
+  remaining_quantity: number;
+  purchase_price: number;
+  selling_price: number;
+  mrp: number;
+  is_from_editing: boolean;
+}
+
+interface DCWithItems {
+  challan_id: string;
+  challan_number: string;
+  challan_date: string;
+  dc_status: string;
+  items: DCItem[];
+}
+
+interface SelectedDCItem {
+  dcItemId: string;
+  dcNumber: string;
+  selected: boolean;
+  quantity: number;
 }
 
 interface Customer {
@@ -104,6 +141,9 @@ export function Sales() {
   const [products, setProducts] = useState<Product[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [pendingChallans, setPendingChallans] = useState<DeliveryChallan[]>([]);
+  const [pendingDCsWithItems, setPendingDCsWithItems] = useState<DCWithItems[]>([]);
+  const [selectedDCItems, setSelectedDCItems] = useState<Map<string, SelectedDCItem>>(new Map());
+  const [expandedDCs, setExpandedDCs] = useState<Set<string>>(new Set());
   const [selectedChallanId, setSelectedChallanId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -293,6 +333,144 @@ export function Sales() {
       console.error('Error loading pending challans:', error);
       setPendingChallans([]);
     }
+  };
+
+  const loadPendingDCItems = async (customerId: string, excludeInvoiceId?: string) => {
+    try {
+      const { data, error } = await supabase
+        .rpc('get_pending_dc_items_for_customer', {
+          p_customer_id: customerId,
+          p_exclude_invoice_id: excludeInvoiceId || null
+        });
+
+      if (error) throw error;
+
+      const dcsWithItems: DCWithItems[] = (data || []).map((dc: any) => ({
+        challan_id: dc.challan_id,
+        challan_number: dc.challan_number,
+        challan_date: dc.challan_date,
+        dc_status: dc.dc_status,
+        items: dc.items || []
+      }));
+
+      setPendingDCsWithItems(dcsWithItems);
+
+      if (excludeInvoiceId && dcsWithItems.length > 0) {
+        const newSelectedItems = new Map<string, SelectedDCItem>();
+        const newExpandedDCs = new Set<string>();
+
+        dcsWithItems.forEach(dc => {
+          dc.items.forEach(item => {
+            if (item.is_from_editing) {
+              newSelectedItems.set(item.dc_item_id, {
+                dcItemId: item.dc_item_id,
+                dcNumber: dc.challan_number,
+                selected: true,
+                quantity: item.remaining_quantity
+              });
+              newExpandedDCs.add(dc.challan_id);
+            }
+          });
+        });
+
+        setSelectedDCItems(newSelectedItems);
+        setExpandedDCs(newExpandedDCs);
+      }
+    } catch (error) {
+      console.error('Error loading pending DC items:', error);
+      setPendingDCsWithItems([]);
+    }
+  };
+
+  const handleDCItemToggle = (dcItem: DCItem, dcNumber: string, checked: boolean) => {
+    const newSelectedItems = new Map(selectedDCItems);
+
+    if (checked) {
+      newSelectedItems.set(dcItem.dc_item_id, {
+        dcItemId: dcItem.dc_item_id,
+        dcNumber: dcNumber,
+        selected: true,
+        quantity: dcItem.remaining_quantity
+      });
+    } else {
+      newSelectedItems.delete(dcItem.dc_item_id);
+    }
+
+    setSelectedDCItems(newSelectedItems);
+    syncItemsFromDCSelection(newSelectedItems);
+  };
+
+  const handleDCExpandToggle = (dcId: string) => {
+    const newExpanded = new Set(expandedDCs);
+    if (newExpanded.has(dcId)) {
+      newExpanded.delete(dcId);
+    } else {
+      newExpanded.add(dcId);
+    }
+    setExpandedDCs(newExpanded);
+  };
+
+  const handleDCSelectAll = (dcId: string, dcItems: DCItem[], dcNumber: string, checked: boolean) => {
+    const newSelectedItems = new Map(selectedDCItems);
+
+    if (checked) {
+      dcItems.forEach(item => {
+        newSelectedItems.set(item.dc_item_id, {
+          dcItemId: item.dc_item_id,
+          dcNumber: dcNumber,
+          selected: true,
+          quantity: item.remaining_quantity
+        });
+      });
+      const newExpanded = new Set(expandedDCs);
+      newExpanded.add(dcId);
+      setExpandedDCs(newExpanded);
+    } else {
+      dcItems.forEach(item => {
+        newSelectedItems.delete(item.dc_item_id);
+      });
+    }
+
+    setSelectedDCItems(newSelectedItems);
+    syncItemsFromDCSelection(newSelectedItems);
+  };
+
+  const syncItemsFromDCSelection = (selectedDCMap: Map<string, SelectedDCItem>) => {
+    const dcItems: InvoiceItem[] = [];
+
+    pendingDCsWithItems.forEach(dc => {
+      dc.items.forEach(dcItem => {
+        const selected = selectedDCMap.get(dcItem.dc_item_id);
+        if (selected) {
+          dcItems.push({
+            product_id: dcItem.product_id,
+            batch_id: dcItem.batch_id,
+            quantity: dcItem.remaining_quantity,
+            unit_price: dcItem.selling_price,
+            tax_rate: 11,
+            total: dcItem.remaining_quantity * dcItem.selling_price * 1.11,
+            delivery_challan_item_id: dcItem.dc_item_id,
+            dc_number: dc.challan_number,
+            max_quantity: dcItem.remaining_quantity
+          });
+        }
+      });
+    });
+
+    const manualItems = items.filter(item => !item.delivery_challan_item_id);
+    setItems([...dcItems, ...manualItems]);
+  };
+
+  const addManualItem = () => {
+    setItems([...items, {
+      product_id: '',
+      batch_id: null,
+      quantity: 1,
+      unit_price: 0,
+      tax_rate: 11,
+      total: 0,
+      delivery_challan_item_id: null
+    }]);
   };
 
   const handleChallanSelect = async (challanId: string) => {
@@ -547,7 +725,7 @@ export function Sales() {
 
         if (deleteItemsError) throw deleteItemsError;
 
-        const { data: updatedInvoice, error: updateError } = await supabase
+        const { data: updatedInvoice, error: updateError} = await supabase
           .from('sales_invoices')
           .update({
             invoice_number: formData.invoice_number,
@@ -562,7 +740,17 @@ export function Sales() {
             subtotal: totals.subtotal,
             tax_amount: totals.taxAmount,
             total_amount: totals.total,
-            linked_challan_ids: selectedChallanId ? [selectedChallanId] : null,
+            linked_challan_ids: (() => {
+              const dcIds = new Set<string>();
+              pendingDCsWithItems.forEach(dc => {
+                dc.items.forEach(item => {
+                  if (selectedDCItems.has(item.dc_item_id)) {
+                    dcIds.add(dc.challan_id);
+                  }
+                });
+              });
+              return dcIds.size > 0 ? Array.from(dcIds) : null;
+            })(),
           })
           .eq('id', editingInvoice.id)
           .select()
@@ -588,7 +776,17 @@ export function Sales() {
             total_amount: totals.total,
             payment_status: 'pending',
             created_by: user.id,
-            linked_challan_ids: selectedChallanId ? [selectedChallanId] : null,
+            linked_challan_ids: (() => {
+              const dcIds = new Set<string>();
+              pendingDCsWithItems.forEach(dc => {
+                dc.items.forEach(item => {
+                  if (selectedDCItems.has(item.dc_item_id)) {
+                    dcIds.add(dc.challan_id);
+                  }
+                });
+              });
+              return dcIds.size > 0 ? Array.from(dcIds) : null;
+            })(),
           }])
           .select()
           .single();
@@ -604,6 +802,7 @@ export function Sales() {
         quantity: item.quantity,
         unit_price: item.unit_price,
         tax_rate: item.tax_rate,
+        delivery_challan_item_id: item.delivery_challan_item_id || null,
       }));
 
       const { error: itemsError } = await supabase
@@ -924,8 +1123,12 @@ export function Sales() {
                         setFormData({ ...formData, customer_id: customerId });
                         setSelectedChallanId('');
                         setPendingChallans([]);
+                        setPendingDCsWithItems([]);
+                        setSelectedDCItems(new Map());
+                        setExpandedDCs(new Set());
                         if (customerId) {
                           loadPendingChallans(customerId);
+                          loadPendingDCItems(customerId, editingInvoice?.id);
                         }
                       }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -1031,14 +1234,27 @@ export function Sales() {
             </div>
 
             <div className="border-t pt-6">
+              {formData.customer_id && pendingDCsWithItems.length > 0 && (
+                <div className="mb-6">
+                  <DCItemSelector
+                    pendingDCs={pendingDCsWithItems}
+                    selectedItems={selectedDCItems}
+                    expandedDCs={expandedDCs}
+                    onItemToggle={handleDCItemToggle}
+                    onExpandToggle={handleDCExpandToggle}
+                    onSelectAll={handleDCSelectAll}
+                  />
+                </div>
+              )}
+
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-sm font-semibold text-gray-900">Line Items</h4>
                 <button
                   type="button"
-                  onClick={addItem}
+                  onClick={addManualItem}
                   className="text-sm text-blue-600 hover:text-blue-700 font-medium"
                 >
-                  + Add Item
+                  + Add Manual Item
                 </button>
               </div>
 
@@ -1049,8 +1265,37 @@ export function Sales() {
                   const margin = calculateMargin(item.unit_price, costPerUnit);
                   const suggestedPrice = getSuggestedPrice(item.batch_id);
 
+                  const isFromDC = !!item.delivery_challan_item_id;
+
                   return (
-                    <div key={index} className="p-3 bg-gray-50 rounded-lg space-y-2">
+                    <div key={index} className="p-3 bg-gray-50 rounded-lg space-y-2 border-l-4" style={{ borderLeftColor: isFromDC ? '#3b82f6' : '#10b981' }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          {isFromDC ? (
+                            <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded">
+                              From DC: {item.dc_number}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded">
+                              Manual Item
+                            </span>
+                          )}
+                          {isFromDC && item.max_quantity && (
+                            <span className="text-xs text-gray-500">
+                              Max: {item.max_quantity} units
+                            </span>
+                          )}
+                        </div>
+                        {!isFromDC && items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem(index)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                       <div className="grid grid-cols-12 gap-2 items-end">
                         <div className="col-span-3">
                           <label className="block text-xs text-gray-600 mb-1">Product *</label>
@@ -1058,6 +1303,7 @@ export function Sales() {
                             value={item.product_id}
                             onChange={(e) => updateItemTotal(index, { ...item, product_id: e.target.value, batch_id: null })}
                             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            disabled={isFromDC}
                             required
                           >
                             <option value="">Select Product</option>
@@ -1077,7 +1323,7 @@ export function Sales() {
                               updateItemTotal(index, { ...item, batch_id: batchId, unit_price: suggested });
                             }}
                             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            disabled={!item.product_id || selectedChallanId !== ''}
+                            disabled={!item.product_id || selectedChallanId !== '' || isFromDC}
                           >
                             <option value="">Select Batch</option>
                             {/* Show only batches with stock > 0 for manual selection */}
