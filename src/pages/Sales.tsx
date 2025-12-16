@@ -1222,6 +1222,19 @@ export function Sales() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
+                      DC Number
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.delivery_challan_number}
+                      onChange={(e) => setFormData({ ...formData, delivery_challan_number: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Delivery Challan Number"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Discount (Rp)
                     </label>
                     <input
@@ -1238,19 +1251,6 @@ export function Sales() {
             </div>
 
             <div className="border-t pt-6">
-              {formData.customer_id && (
-                <div className="mb-6">
-                  <DCItemSelector
-                    pendingDCs={pendingDCsWithItems}
-                    selectedItems={selectedDCItems}
-                    expandedDCs={expandedDCs}
-                    onItemToggle={handleDCItemToggle}
-                    onExpandToggle={handleDCExpandToggle}
-                    onSelectAll={handleDCSelectAll}
-                  />
-                </div>
-              )}
-
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-sm font-semibold text-gray-900">Line Items</h4>
                 <button
