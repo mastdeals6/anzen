@@ -621,12 +621,34 @@ export function Sales() {
     try {
       const { data, error } = await supabase
         .from('sales_invoice_items')
-        .select('*, products(product_name, product_code, unit), batches(batch_number, expiry_date)')
+        .select(`
+          *,
+          products(product_name, product_code, unit),
+          batches(batch_number, expiry_date),
+          delivery_challan_item_id
+        `)
         .eq('invoice_id', invoiceId);
 
       if (error) throw error;
-      setInvoiceItems(data || []);
-      return data || [];
+
+      const itemsWithDCInfo = await Promise.all((data || []).map(async (item) => {
+        if (item.delivery_challan_item_id) {
+          const { data: dcItemData } = await supabase
+            .from('delivery_challan_items')
+            .select('challan_id, delivery_challans(challan_number)')
+            .eq('id', item.delivery_challan_item_id)
+            .maybeSingle();
+
+          return {
+            ...item,
+            dc_number: (dcItemData?.delivery_challans as any)?.challan_number,
+          };
+        }
+        return item;
+      }));
+
+      setInvoiceItems(itemsWithDCInfo || []);
+      return itemsWithDCInfo || [];
     } catch (error) {
       console.error('Error loading invoice items:', error);
       return [];
@@ -842,6 +864,8 @@ export function Sales() {
       notes: invoice.notes || '',
     });
 
+    await loadPendingDCItems(invoice.customer_id, invoice.id);
+
     const loadedItems = await loadInvoiceItems(invoice.id);
 
     if (loadedItems.length > 0) {
@@ -852,6 +876,8 @@ export function Sales() {
         unit_price: item.unit_price,
         tax_rate: item.tax_rate,
         total: item.total,
+        delivery_challan_item_id: item.delivery_challan_item_id,
+        dc_number: item.dc_number,
       })));
     }
 
@@ -1143,27 +1169,38 @@ export function Sales() {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Select Delivery Challan (Optional)
-                    </label>
-                    <select
-                      value={selectedChallanId}
-                      onChange={(e) => handleChallanSelect(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      disabled={!formData.customer_id}
-                    >
-                      <option value="">No Delivery Challan / Manual Entry</option>
-                      {pendingChallans.map((challan) => (
-                        <option key={challan.id} value={challan.id}>
-                          {challan.challan_number} - {new Date(challan.challan_date).toLocaleDateString()}
-                        </option>
-                      ))}
-                    </select>
-                    {formData.customer_id && pendingChallans.length === 0 && (
-                      <p className="text-xs text-gray-500 mt-1">No pending delivery challans for this customer</p>
-                    )}
-                  </div>
+                  {(() => {
+                    const linkedDCs = new Set<string>();
+                    items.forEach(item => {
+                      if (item.dc_number) {
+                        linkedDCs.add(item.dc_number);
+                      }
+                    });
+
+                    if (linkedDCs.size > 0) {
+                      return (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Linked Delivery Challans
+                          </label>
+                          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <div className="flex flex-wrap gap-2">
+                              {Array.from(linkedDCs).map(dcNumber => (
+                                <span key={dcNumber} className="inline-flex items-center px-2.5 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                                  {dcNumber}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="text-xs text-blue-600 mt-2">
+                              This invoice includes items from the above delivery challan(s)
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
