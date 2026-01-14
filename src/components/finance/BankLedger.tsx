@@ -311,7 +311,7 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
 
       // Get petty cash transactions
       const { data: pettyCash } = await supabase
-        .from('petty_cash')
+        .from('petty_cash_transactions')
         .select('id, transaction_date, voucher_number, amount, description, transaction_type')
         .eq('bank_account_id', selectedBank)
         .gte('transaction_date', dateRange.start)
