@@ -541,7 +541,7 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
           <div className="mb-4 p-3 bg-blue-50 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-700">Opening Balance {selectedBankData.opening_balance_date && `(as of ${new Date(selectedBankData.opening_balance_date).toLocaleDateString('id-ID')})`}</p>
+                <p className="text-sm font-medium text-gray-700">Opening Balance (as of {new Date(dateRange.start).toLocaleDateString('id-ID')})</p>
                 <p className="text-lg font-bold text-blue-600">
                   {formatAmount(openingBalance, selectedBankData.currency)}
                 </p>
@@ -591,7 +591,7 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
               <tbody className="bg-white divide-y divide-gray-200">
                 <tr className="bg-blue-50 font-semibold">
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
-                    {selectedBankData?.opening_balance_date && new Date(selectedBankData.opening_balance_date).toLocaleDateString('id-ID')}
+                    {new Date(dateRange.start).toLocaleDateString('id-ID')}
                   </td>
                   <td className="px-3 py-2 text-sm text-gray-900" colSpan={2}>
                     Opening Balance
