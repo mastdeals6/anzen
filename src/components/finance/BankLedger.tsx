@@ -36,7 +36,7 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
   const [expenseDocuments, setExpenseDocuments] = useState<string[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [dateRange, setDateRange] = useState({
-    start: new Date(new Date().getFullYear(), 3, 1).toISOString().split('T')[0],
+    start: new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0],
   });
   const [openingBalance, setOpeningBalance] = useState(0);
@@ -147,7 +147,8 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
       endDatePlusOne.setDate(endDatePlusOne.getDate() + 1);
       const endDateStr = endDatePlusOne.toISOString().split('T')[0];
 
-      // Get bank statement lines FIRST (actual bank transactions)
+      // Get bank statement lines ONLY (actual bank transactions)
+      // Bank statements are the source of truth - they already include all cleared transactions
       const { data: bankLines } = await supabase
         .from('bank_statement_lines')
         .select('id, transaction_date, description, reference, debit_amount, credit_amount, matched_expense_id, matched_receipt_id, matched_entry_id, notes')
@@ -155,6 +156,8 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
         .gte('transaction_date', dateRange.start)
         .lt('transaction_date', endDateStr)
         .order('transaction_date');
+
+      console.log('✅ Bank statement lines found:', bankLines?.length || 0);
 
       if (bankLines) {
         bankLines.forEach(line => {
@@ -169,182 +172,6 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
             linkedId: line.matched_expense_id || line.matched_receipt_id || line.matched_entry_id,
             notes: line.notes
           });
-        });
-      }
-
-      // Get receipt vouchers (customer payments - increases bank balance)
-      const { data: receipts } = await supabase
-        .from('receipt_vouchers')
-        .select('id, voucher_date, voucher_number, amount, description, customers(company_name)')
-        .eq('bank_account_id', selectedBank)
-        .gte('voucher_date', dateRange.start)
-        .lte('voucher_date', dateRange.end)
-        .order('voucher_date');
-
-      console.log('✅ Receipt Vouchers found for bank:', receipts?.length || 0);
-
-      if (receipts) {
-        receipts.forEach(r => {
-          entries.push({
-            id: r.id,
-            entry_date: r.voucher_date,
-            particulars: `Receipt from ${(r.customers as any)?.company_name || 'Customer'}`,
-            reference: r.voucher_number,
-            debit: 0,
-            credit: r.amount,
-            type: 'receipt',
-            description: r.description,
-            customerName: (r.customers as any)?.company_name
-          });
-        });
-      }
-
-      // Get payment vouchers (supplier payments - decreases bank balance)
-      const { data: payments } = await supabase
-        .from('payment_vouchers')
-        .select('id, voucher_date, voucher_number, amount, description, suppliers(company_name)')
-        .eq('bank_account_id', selectedBank)
-        .gte('voucher_date', dateRange.start)
-        .lte('voucher_date', dateRange.end)
-        .order('voucher_date');
-
-      console.log('✅ Payment Vouchers found for bank:', payments?.length || 0);
-
-      if (payments) {
-        payments.forEach(p => {
-          entries.push({
-            id: p.id,
-            entry_date: p.voucher_date,
-            particulars: `Payment to ${(p.suppliers as any)?.company_name || 'Supplier'}`,
-            reference: p.voucher_number,
-            debit: p.amount,
-            credit: 0,
-            type: 'payment',
-            description: p.description,
-            supplierName: (p.suppliers as any)?.company_name
-          });
-        });
-      }
-
-      // Get expenses paid via bank
-      const { data: expenses } = await supabase
-        .from('finance_expenses')
-        .select('id, expense_date, voucher_number, amount, description, expense_category, context_type, context_id')
-        .eq('bank_account_id', selectedBank)
-        .gte('expense_date', dateRange.start)
-        .lte('expense_date', dateRange.end)
-        .order('expense_date');
-
-      console.log('✅ Bank Expenses found for bank:', expenses?.length || 0);
-
-      if (expenses) {
-        expenses.forEach(e => {
-          entries.push({
-            id: e.id,
-            entry_date: e.expense_date,
-            particulars: `Expense - ${e.expense_category || e.description || 'General'}`,
-            reference: e.voucher_number || '-',
-            debit: e.amount,
-            credit: 0,
-            type: 'expense',
-            description: e.description,
-            expenseCategory: e.expense_category,
-            contextType: e.context_type,
-            contextId: e.context_id
-          });
-        });
-      }
-
-      // Get fund transfers FROM this account (money out)
-      const { data: transfersOut } = await supabase
-        .from('fund_transfers')
-        .select('id, transfer_date, reference_number, from_amount, to_amount, description, from_accounts:from_account_id(bank_name, account_number), to_accounts:to_account_id(bank_name, account_number)')
-        .eq('from_account_id', selectedBank)
-        .gte('transfer_date', dateRange.start)
-        .lte('transfer_date', dateRange.end)
-        .order('transfer_date');
-
-      console.log('✅ Fund Transfers OUT found:', transfersOut?.length || 0);
-
-      if (transfersOut) {
-        transfersOut.forEach(t => {
-          const toAccount = (t.to_accounts as any);
-          entries.push({
-            id: t.id,
-            entry_date: t.transfer_date,
-            particulars: `Fund Transfer to ${toAccount?.bank_name || 'Account'} ${toAccount?.account_number || ''}`,
-            reference: t.reference_number || '-',
-            debit: t.from_amount,
-            credit: 0,
-            type: 'fund_transfer_out',
-            description: t.description
-          });
-        });
-      }
-
-      // Get fund transfers TO this account (money in)
-      const { data: transfersIn } = await supabase
-        .from('fund_transfers')
-        .select('id, transfer_date, reference_number, from_amount, to_amount, description, from_accounts:from_account_id(bank_name, account_number), to_accounts:to_account_id(bank_name, account_number)')
-        .eq('to_account_id', selectedBank)
-        .gte('transfer_date', dateRange.start)
-        .lte('transfer_date', dateRange.end)
-        .order('transfer_date');
-
-      console.log('✅ Fund Transfers IN found:', transfersIn?.length || 0);
-
-      if (transfersIn) {
-        transfersIn.forEach(t => {
-          const fromAccount = (t.from_accounts as any);
-          entries.push({
-            id: t.id,
-            entry_date: t.transfer_date,
-            particulars: `Fund Transfer from ${fromAccount?.bank_name || 'Account'} ${fromAccount?.account_number || ''}`,
-            reference: t.reference_number || '-',
-            debit: 0,
-            credit: t.to_amount,
-            type: 'fund_transfer_in',
-            description: t.description
-          });
-        });
-      }
-
-      // Get petty cash transactions
-      const { data: pettyCash } = await supabase
-        .from('petty_cash_transactions')
-        .select('id, transaction_date, voucher_number, amount, description, transaction_type')
-        .eq('bank_account_id', selectedBank)
-        .gte('transaction_date', dateRange.start)
-        .lte('transaction_date', dateRange.end)
-        .order('transaction_date');
-
-      console.log('✅ Petty Cash transactions found:', pettyCash?.length || 0);
-
-      if (pettyCash) {
-        pettyCash.forEach(pc => {
-          if (pc.transaction_type === 'replenishment') {
-            entries.push({
-              id: pc.id,
-              entry_date: pc.transaction_date,
-              particulars: `Petty Cash Replenishment - ${pc.description || ''}`,
-              reference: pc.voucher_number || '-',
-              debit: pc.amount,
-              credit: 0,
-              type: 'petty_cash_out',
-              description: pc.description
-            });
-          } else if (pc.transaction_type === 'deposit') {
-            entries.push({
-              id: pc.id,
-              entry_date: pc.transaction_date,
-              particulars: `Petty Cash Deposit - ${pc.description || ''}`,
-              reference: pc.voucher_number || '-',
-              debit: 0,
-              credit: pc.amount,
-              type: 'petty_cash_in',
-              description: pc.description
-            });
-          }
         });
       }
 
