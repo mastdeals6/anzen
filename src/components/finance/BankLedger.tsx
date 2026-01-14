@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { BookOpen, Download, RefreshCw } from 'lucide-react';
+import { Modal } from '../Modal';
 
 interface BankAccount {
   id: string;
@@ -39,6 +40,11 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
     end: new Date().toISOString().split('T')[0],
   });
   const [openingBalance, setOpeningBalance] = useState(0);
+  const [showOpeningBalanceModal, setShowOpeningBalanceModal] = useState(false);
+  const [openingBalanceForm, setOpeningBalanceForm] = useState({
+    balance: 0,
+    date: '2025-01-01'
+  });
 
   useEffect(() => {
     loadBanks();
@@ -381,21 +387,36 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
     }
   };
 
-  const updateOpeningBalance = async (newBalance: number) => {
+  const updateOpeningBalance = async () => {
     if (!selectedBank) return;
 
     try {
       const { error } = await supabase
         .from('bank_accounts')
-        .update({ opening_balance: newBalance })
+        .update({
+          opening_balance: openingBalanceForm.balance,
+          opening_balance_date: openingBalanceForm.date
+        })
         .eq('id', selectedBank);
 
       if (error) throw error;
 
+      setShowOpeningBalanceModal(false);
       await loadBanks();
       await loadLedgerEntries();
     } catch (err: any) {
       alert('Failed to update opening balance: ' + err.message);
+    }
+  };
+
+  const openEditOpeningBalance = () => {
+    const selectedBankData = banks.find(b => b.id === selectedBank);
+    if (selectedBankData) {
+      setOpeningBalanceForm({
+        balance: selectedBankData.opening_balance,
+        date: selectedBankData.opening_balance_date || '2025-01-01'
+      });
+      setShowOpeningBalanceModal(true);
     }
   };
 
@@ -520,21 +541,18 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
           <div className="mb-4 p-3 bg-blue-50 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-700">Opening Balance</p>
+                <p className="text-sm font-medium text-gray-700">Opening Balance {selectedBankData.opening_balance_date && `(as of ${new Date(selectedBankData.opening_balance_date).toLocaleDateString('id-ID')})`}</p>
                 <p className="text-lg font-bold text-blue-600">
                   {formatAmount(openingBalance, selectedBankData.currency)}
                 </p>
+                {dateRange.start > selectedBankData.opening_balance_date && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Adjusted for filtered date range
+                  </p>
+                )}
               </div>
               <button
-                onClick={() => {
-                  const newBalance = prompt('Enter new opening balance:', openingBalance.toString());
-                  if (newBalance !== null) {
-                    const parsed = parseFloat(newBalance);
-                    if (!isNaN(parsed)) {
-                      updateOpeningBalance(parsed);
-                    }
-                  }
-                }}
+                onClick={openEditOpeningBalance}
                 className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
               >
                 Update
@@ -572,8 +590,14 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 <tr className="bg-blue-50 font-semibold">
-                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900" colSpan={3}>
+                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900">
+                    {selectedBankData?.opening_balance_date && new Date(selectedBankData.opening_balance_date).toLocaleDateString('id-ID')}
+                  </td>
+                  <td className="px-3 py-2 text-sm text-gray-900" colSpan={2}>
                     Opening Balance
+                    {dateRange.start > (selectedBankData?.opening_balance_date || '') && (
+                      <span className="ml-2 text-xs font-normal text-gray-600">(adjusted for date filter)</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">-</td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 text-right">-</td>
@@ -777,6 +801,60 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={showOpeningBalanceModal}
+        onClose={() => setShowOpeningBalanceModal(false)}
+        title="Update Opening Balance"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Opening Balance Amount *
+            </label>
+            <input
+              type="number"
+              value={openingBalanceForm.balance}
+              onChange={(e) => setOpeningBalanceForm({ ...openingBalanceForm, balance: parseFloat(e.target.value) || 0 })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              required
+              step="0.01"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Opening Balance Date *
+            </label>
+            <input
+              type="date"
+              value={openingBalanceForm.date}
+              onChange={(e) => setOpeningBalanceForm({ ...openingBalanceForm, date: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Set the date when this opening balance is effective. All transactions from this date onwards will be included in the ledger.
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t">
+            <button
+              type="button"
+              onClick={() => setShowOpeningBalanceModal(false)}
+              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={updateOpeningBalance}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Update
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
