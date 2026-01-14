@@ -249,8 +249,111 @@ export default function BankLedger({ selectedBank: propSelectedBank }: BankLedge
         });
       }
 
-      // Sort by date
-      entries.sort((a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime());
+      // Get fund transfers FROM this account (money out)
+      const { data: transfersOut } = await supabase
+        .from('fund_transfers')
+        .select('id, transfer_date, reference_number, from_amount, to_amount, description, from_accounts:from_account_id(bank_name, account_number), to_accounts:to_account_id(bank_name, account_number)')
+        .eq('from_account_id', selectedBank)
+        .gte('transfer_date', dateRange.start)
+        .lte('transfer_date', dateRange.end)
+        .order('transfer_date');
+
+      console.log('✅ Fund Transfers OUT found:', transfersOut?.length || 0);
+
+      if (transfersOut) {
+        transfersOut.forEach(t => {
+          const toAccount = (t.to_accounts as any);
+          entries.push({
+            id: t.id,
+            entry_date: t.transfer_date,
+            particulars: `Fund Transfer to ${toAccount?.bank_name || 'Account'} ${toAccount?.account_number || ''}`,
+            reference: t.reference_number || '-',
+            debit: t.from_amount,
+            credit: 0,
+            type: 'fund_transfer_out',
+            description: t.description
+          });
+        });
+      }
+
+      // Get fund transfers TO this account (money in)
+      const { data: transfersIn } = await supabase
+        .from('fund_transfers')
+        .select('id, transfer_date, reference_number, from_amount, to_amount, description, from_accounts:from_account_id(bank_name, account_number), to_accounts:to_account_id(bank_name, account_number)')
+        .eq('to_account_id', selectedBank)
+        .gte('transfer_date', dateRange.start)
+        .lte('transfer_date', dateRange.end)
+        .order('transfer_date');
+
+      console.log('✅ Fund Transfers IN found:', transfersIn?.length || 0);
+
+      if (transfersIn) {
+        transfersIn.forEach(t => {
+          const fromAccount = (t.from_accounts as any);
+          entries.push({
+            id: t.id,
+            entry_date: t.transfer_date,
+            particulars: `Fund Transfer from ${fromAccount?.bank_name || 'Account'} ${fromAccount?.account_number || ''}`,
+            reference: t.reference_number || '-',
+            debit: 0,
+            credit: t.to_amount,
+            type: 'fund_transfer_in',
+            description: t.description
+          });
+        });
+      }
+
+      // Get petty cash transactions
+      const { data: pettyCash } = await supabase
+        .from('petty_cash')
+        .select('id, transaction_date, voucher_number, amount, description, transaction_type')
+        .eq('bank_account_id', selectedBank)
+        .gte('transaction_date', dateRange.start)
+        .lte('transaction_date', dateRange.end)
+        .order('transaction_date');
+
+      console.log('✅ Petty Cash transactions found:', pettyCash?.length || 0);
+
+      if (pettyCash) {
+        pettyCash.forEach(pc => {
+          if (pc.transaction_type === 'replenishment') {
+            entries.push({
+              id: pc.id,
+              entry_date: pc.transaction_date,
+              particulars: `Petty Cash Replenishment - ${pc.description || ''}`,
+              reference: pc.voucher_number || '-',
+              debit: pc.amount,
+              credit: 0,
+              type: 'petty_cash_out',
+              description: pc.description
+            });
+          } else if (pc.transaction_type === 'deposit') {
+            entries.push({
+              id: pc.id,
+              entry_date: pc.transaction_date,
+              particulars: `Petty Cash Deposit - ${pc.description || ''}`,
+              reference: pc.voucher_number || '-',
+              debit: 0,
+              credit: pc.amount,
+              type: 'petty_cash_in',
+              description: pc.description
+            });
+          }
+        });
+      }
+
+      // Sort by date, then by type (credits before debits on same date)
+      entries.sort((a, b) => {
+        const dateCompare = new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime();
+        if (dateCompare !== 0) return dateCompare;
+
+        // On same date, show credits (money in) before debits (money out)
+        const aIsCredit = a.credit > 0;
+        const bIsCredit = b.credit > 0;
+        if (aIsCredit && !bIsCredit) return -1;
+        if (!aIsCredit && bIsCredit) return 1;
+        return 0;
+      });
 
       let runningBalance = effectiveOpeningBalance;
       const ledger: LedgerEntry[] = entries.map((entry: any) => {
