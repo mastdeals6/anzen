@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { AlertTriangle, Plus, Search, CheckCircle, XCircle, Clock, Upload, Eye, Camera, FileText, Edit, Trash2 } from 'lucide-react';
 import { Modal } from '../components/Modal';
+import { StockRejectionView } from '../components/StockRejectionView';
 
 interface StockRejection {
   id: string;
@@ -19,6 +20,7 @@ interface StockRejection {
   product: {
     product_name: string;
     product_code: string;
+    unit: string;
   };
   batch: {
     batch_number: string;
@@ -85,7 +87,7 @@ export default function StockRejections() {
         .from('stock_rejections')
         .select(`
           *,
-          product:products(product_name, product_code),
+          product:products(product_name, product_code, unit),
           batch:batches(batch_number, current_stock)
         `)
         .order('created_at', { ascending: false });
@@ -769,6 +771,16 @@ export default function StockRejections() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {showDetailsModal && selectedRejection && (
+        <StockRejectionView
+          rejection={selectedRejection}
+          onClose={() => {
+            setShowDetailsModal(false);
+            setSelectedRejection(null);
+          }}
+        />
       )}
     </div>
   );

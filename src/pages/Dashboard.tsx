@@ -51,6 +51,7 @@ export function Dashboard() {
     overdueInvoicesAmount: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -58,23 +59,23 @@ export function Dashboard() {
 
   const loadDashboardData = async () => {
     try {
+      setError(null);
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
       const [
         productsResult,
-        batchesResult,
+        productsWithStockResult,
         customersResult,
         invoicesResult,
         activitiesResult,
-        settings,
         pendingSalesOrdersResult,
         pendingDCResult,
         overdueInvoicesResult,
       ] = await Promise.all([
         supabase.from('products').select('id', { count: 'exact', head: true }).eq('is_active', true),
-        supabase.from('batches').select('*').eq('is_active', true),
+        supabase.from('products').select('id, min_stock_level, current_stock').eq('is_active', true),
         supabase.from('customers').select('id', { count: 'exact', head: true }).eq('is_active', true),
         supabase
           .from('sales_invoices')
@@ -86,10 +87,6 @@ export function Dashboard() {
           .select('id', { count: 'exact' })
           .eq('is_completed', false)
           .not('follow_up_date', 'is', null),
-        supabase
-          .from('app_settings')
-          .select('low_stock_threshold')
-          .maybeSingle(),
         supabase
           .from('sales_orders')
           .select('id', { count: 'exact', head: true })
@@ -105,8 +102,11 @@ export function Dashboard() {
           .lt('due_date', new Date().toISOString().split('T')[0]),
       ]);
 
-      const lowStockThreshold = settings?.data?.low_stock_threshold || 100;
-      const lowStockCount = batchesResult.data?.filter(b => b.current_stock < lowStockThreshold).length || 0;
+      const lowStockCount = productsWithStockResult.data?.filter(p =>
+        p.min_stock_level > 0 && p.current_stock < p.min_stock_level
+      ).length || 0;
+
+      const batchesResult = await supabase.from('batches').select('current_stock, expiry_date').eq('is_active', true);
 
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
@@ -145,8 +145,8 @@ export function Dashboard() {
         overdueInvoicesCount: overdueInvoicesResult.data?.length || 0,
         overdueInvoicesAmount: overdueAmount,
       });
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
+    } catch (err) {
+      setError('Failed to load dashboard data. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -178,7 +178,7 @@ export function Dashboard() {
     approvalCards.push({
       title: 'Overdue Invoices',
       value: stats.overdueInvoicesCount,
-      subtitle: `Rp ${stats.overdueInvoicesAmount.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+      subtitle: `Rp ${stats.overdueInvoicesAmount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       icon: AlertTriangle,
       color: 'red-gradient',
       link: 'sales'
@@ -224,7 +224,18 @@ export function Dashboard() {
           <p className="text-gray-600 mt-1">Welcome to your pharma trading management system</p>
         </div>
 
-        {loading ? (
+        {error ? (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+            <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+            <p className="text-red-700 font-medium">{error}</p>
+            <button
+              onClick={loadDashboardData}
+              className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : loading ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
             {[...Array(8)].map((_, i) => (
               <div key={i} className="bg-white rounded-lg shadow p-4 animate-pulse">
