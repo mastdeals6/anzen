@@ -273,20 +273,27 @@ export function Sales() {
 
   const generateNextInvoiceNumber = async () => {
     try {
-      // Get settings for invoice prefix
+      // Get settings for invoice prefix and financial year
       const { data: settings } = await supabase
         .from('app_settings')
-        .select('invoice_prefix, invoice_start_number')
+        .select('invoice_prefix, invoice_start_number, financial_year_start')
         .maybeSingle();
 
       const prefix = settings?.invoice_prefix || 'SAPJ';
       const startNumber = settings?.invoice_start_number || 1;
 
-      // Get all invoice numbers with this prefix to find the highest number
+      // Get financial year code
+      let yearCode = new Date().getFullYear().toString().slice(-2);
+      if (settings?.financial_year_start) {
+        const fyYear = new Date(settings.financial_year_start).getFullYear();
+        yearCode = fyYear.toString().slice(-2);
+      }
+
+      // Get all invoice numbers with this prefix and year to find the highest number
       const { data: allInvoices } = await supabase
         .from('sales_invoices')
         .select('invoice_number')
-        .like('invoice_number', `${prefix}%`);
+        .like('invoice_number', `${prefix}-${yearCode}%`);
 
       let nextNumber = startNumber;
 
@@ -307,10 +314,10 @@ export function Sales() {
 
       // Format with leading zeros (minimum 3 digits)
       const paddedNumber = String(nextNumber).padStart(3, '0');
-      return `${prefix}-${paddedNumber}`;
+      return `${prefix}-${yearCode}-${paddedNumber}`;
     } catch (error) {
       console.error('Error generating invoice number:', error);
-      return 'SAPJ-001';
+      return 'SAPJ-26-001';
     }
   };
 
