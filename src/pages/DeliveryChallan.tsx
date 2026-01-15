@@ -510,10 +510,18 @@ export function DeliveryChallan() {
   };
 
   const handleEdit = async (challan: DeliveryChallan) => {
+    // Load full challan with sales_order_id
+    const { data: fullChallan } = await supabase
+      .from('delivery_challans')
+      .select('*')
+      .eq('id', challan.id)
+      .single();
+
     setEditingChallan(challan);
     setFormData({
       challan_number: challan.challan_number,
       customer_id: challan.customer_id,
+      sales_order_id: fullChallan?.sales_order_id || '',
       challan_date: challan.challan_date,
       delivery_address: challan.delivery_address,
       vehicle_number: challan.vehicle_number || '',
@@ -590,25 +598,25 @@ export function DeliveryChallan() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const challanData = {
-        challan_number: formData.challan_number,
-        customer_id: formData.customer_id,
-        sales_order_id: formData.sales_order_id || null,
-        challan_date: formData.challan_date,
-        delivery_address: formData.delivery_address,
-        vehicle_number: formData.vehicle_number || null,
-        driver_name: formData.driver_name || null,
-        notes: formData.notes || null,
-        approval_status: 'pending_approval',
-        created_by: user.id,
-      };
-
       let challanId: string;
 
       if (editingChallan) {
+        // When editing, DO NOT update challan_number (it's unique and shouldn't change)
+        const updateData = {
+          customer_id: formData.customer_id,
+          sales_order_id: formData.sales_order_id || null,
+          challan_date: formData.challan_date,
+          delivery_address: formData.delivery_address,
+          vehicle_number: formData.vehicle_number || null,
+          driver_name: formData.driver_name || null,
+          notes: formData.notes || null,
+          // Don't reset approval_status when editing
+          // Don't update created_by when editing
+        };
+
         const { data: updatedChallan, error: updateError } = await supabase
           .from('delivery_challans')
-          .update(challanData)
+          .update(updateData)
           .eq('id', editingChallan.id)
           .select()
           .single();
@@ -640,6 +648,20 @@ export function DeliveryChallan() {
 
         challanId = updatedChallan.id;
       } else {
+        // When creating new, include all fields including challan_number
+        const challanData = {
+          challan_number: formData.challan_number,
+          customer_id: formData.customer_id,
+          sales_order_id: formData.sales_order_id || null,
+          challan_date: formData.challan_date,
+          delivery_address: formData.delivery_address,
+          vehicle_number: formData.vehicle_number || null,
+          driver_name: formData.driver_name || null,
+          notes: formData.notes || null,
+          approval_status: 'pending_approval',
+          created_by: user.id,
+        };
+
         const { data: newChallan, error: challanError } = await supabase
           .from('delivery_challans')
           .insert([challanData])
