@@ -223,19 +223,14 @@ export function DeliveryChallan() {
 
   const generateNextChallanNumber = async () => {
     try {
-      // Get financial year from settings
-      const { data: settings } = await supabase
-        .from('app_settings')
-        .select('financial_year_start')
-        .limit(1)
-        .maybeSingle();
+      // Get current financial year automatically
+      const { data: yearCode, error: fyError } = await supabase
+        .rpc('get_current_financial_year');
 
-      let yearCode = new Date().getFullYear().toString().slice(-2);
-
-      // If financial year is set, use it
-      if (settings?.financial_year_start) {
-        const fyYear = new Date(settings.financial_year_start).getFullYear();
-        yearCode = fyYear.toString().slice(-2);
+      if (fyError) {
+        console.error('Error getting financial year:', fyError);
+        const fallbackYear = new Date().getFullYear().toString().slice(-2);
+        return `DO-${fallbackYear}-0001`;
       }
 
       const prefix = 'DO';
@@ -267,7 +262,8 @@ export function DeliveryChallan() {
       return `${prefix}-${yearCode}-${paddedNumber}`;
     } catch (error) {
       console.error('Error generating challan number:', error);
-      return 'DO-25-0001';
+      const fallbackYear = new Date().getFullYear().toString().slice(-2);
+      return `DO-${fallbackYear}-0001`;
     }
   };
 
