@@ -21,7 +21,7 @@ import { PurchaseInvoiceManager } from '../components/finance/PurchaseInvoiceMan
 import { ReceiptVoucherManager } from '../components/finance/ReceiptVoucherManager';
 import { PaymentVoucherManager } from '../components/finance/PaymentVoucherManager';
 import { PettyCashManager } from '../components/finance/PettyCashManager';
-import { JournalEntryViewer } from '../components/finance/JournalEntryViewer';
+import { JournalEntryViewerEnhanced as JournalEntryViewer } from '../components/finance/JournalEntryViewerEnhanced';
 import { FinancialReports } from '../components/finance/FinancialReports';
 import { BankReconciliationEnhanced as BankReconciliation } from '../components/finance/BankReconciliationEnhanced';
 import { ExpenseManager } from '../components/finance/ExpenseManager';
