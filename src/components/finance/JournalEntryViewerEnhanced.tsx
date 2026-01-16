@@ -31,22 +31,19 @@ interface JournalEntryLine {
   suppliers?: { company_name: string } | null;
 }
 
-interface FlatJournalLine {
+interface VoucherJournalEntry {
   journal_entry_id: string;
-  line_id: string;
   date: string;
   voucher_no: string;
   voucher_type: string;
-  account_code: string;
-  ledger: string;
-  debit: number;
-  credit: number;
+  debit_account: string;
+  credit_account: string;
+  amount: number;
   narration: string;
   reference_number: string | null;
   source_module: string | null;
-  customer_name: string | null;
-  supplier_name: string | null;
-  line_number: number;
+  line_count: number;
+  is_multi_line: boolean;
 }
 
 interface JournalEntryViewerEnhancedProps {
@@ -65,9 +62,7 @@ const sourceModuleLabels: Record<string, string> = {
 };
 
 export function JournalEntryViewerEnhanced({ canManage }: JournalEntryViewerEnhancedProps) {
-  const [viewMode, setViewMode] = useState<'journal' | 'voucher'>('journal');
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [flatLines, setFlatLines] = useState<FlatJournalLine[]>([]);
+  const [voucherEntries, setVoucherEntries] = useState<VoucherJournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null);
@@ -80,18 +75,14 @@ export function JournalEntryViewerEnhanced({ canManage }: JournalEntryViewerEnha
   const [filterModule, setFilterModule] = useState('all');
 
   useEffect(() => {
-    if (viewMode === 'journal') {
-      loadFlatJournal();
-    } else {
-      loadEntries();
-    }
-  }, [dateRange, filterModule, viewMode]);
+    loadVoucherJournal();
+  }, [dateRange, filterModule]);
 
-  const loadFlatJournal = async () => {
+  const loadVoucherJournal = async () => {
     try {
       setLoading(true);
       let query = supabase
-        .from('journal_flat_view')
+        .from('journal_voucher_view')
         .select('*')
         .gte('date', dateRange.start)
         .lte('date', dateRange.end);
@@ -103,35 +94,9 @@ export function JournalEntryViewerEnhanced({ canManage }: JournalEntryViewerEnha
       const { data, error } = await query;
 
       if (error) throw error;
-      setFlatLines(data || []);
+      setVoucherEntries(data || []);
     } catch (error) {
-      console.error('Error loading flat journal:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadEntries = async () => {
-    try {
-      setLoading(true);
-      let query = supabase
-        .from('journal_entries')
-        .select('*')
-        .gte('entry_date', dateRange.start)
-        .lte('entry_date', dateRange.end)
-        .order('entry_date', { ascending: false })
-        .order('entry_number', { ascending: false });
-
-      if (filterModule !== 'all') {
-        query = query.eq('source_module', filterModule);
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setEntries(data || []);
-    } catch (error) {
-      console.error('Error loading entries:', error);
+      console.error('Error loading voucher journal:', error);
     } finally {
       setLoading(false);
     }
@@ -152,33 +117,36 @@ export function JournalEntryViewerEnhanced({ canManage }: JournalEntryViewerEnha
     }
   };
 
-  const handleViewEntry = async (entry: JournalEntry) => {
-    setSelectedEntry(entry);
-    await loadEntryLines(entry.id);
-    setViewModalOpen(true);
+  const handleViewVoucher = async (voucherEntry: VoucherJournalEntry) => {
+    try {
+      // Load full journal entry details
+      const { data: entry, error: entryError } = await supabase
+        .from('journal_entries')
+        .select('*')
+        .eq('id', voucherEntry.journal_entry_id)
+        .single();
+
+      if (entryError) throw entryError;
+
+      setSelectedEntry(entry);
+      await loadEntryLines(voucherEntry.journal_entry_id);
+      setViewModalOpen(true);
+    } catch (error) {
+      console.error('Error loading voucher details:', error);
+    }
   };
 
-  const filteredEntries = entries.filter(e =>
-    e.entry_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (e.reference_number && e.reference_number.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (e.description && e.description.toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredVouchers = voucherEntries.filter(v =>
+    v.voucher_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (v.debit_account && v.debit_account.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (v.credit_account && v.credit_account.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (v.narration && v.narration.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (v.reference_number && v.reference_number.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const filteredFlatLines = flatLines.filter(line =>
-    line.voucher_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    line.ledger.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    line.narration.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (line.reference_number && line.reference_number.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
-
-  const voucherTotals = {
-    debit: filteredEntries.reduce((sum, e) => sum + e.total_debit, 0),
-    credit: filteredEntries.reduce((sum, e) => sum + e.total_credit, 0),
-  };
-
-  const journalTotals = {
-    debit: filteredFlatLines.reduce((sum, line) => sum + line.debit, 0),
-    credit: filteredFlatLines.reduce((sum, line) => sum + line.credit, 0),
+  const totals = {
+    debit: filteredVouchers.reduce((sum, v) => sum + v.amount, 0),
+    credit: filteredVouchers.reduce((sum, v) => sum + v.amount, 0),
   };
 
   if (loading) {
@@ -187,44 +155,13 @@ export function JournalEntryViewerEnhanced({ canManage }: JournalEntryViewerEnha
 
   return (
     <div className="space-y-4">
-      {/* View Mode Toggle */}
-      <div className="flex items-center justify-between bg-white rounded-lg shadow p-4">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setViewMode('journal')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              viewMode === 'journal'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <Table2 className="w-4 h-4" />
-            Journal View (CA)
-          </button>
-          <button
-            onClick={() => setViewMode('voucher')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              viewMode === 'voucher'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <LayoutList className="w-4 h-4" />
-            Voucher View (Admin)
-          </button>
-        </div>
-        <div className="text-xs text-gray-500">
-          {viewMode === 'journal' ? 'Flat view - Read only' : 'Grouped view - Click to view details'}
-        </div>
-      </div>
-
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
             type="text"
-            placeholder={viewMode === 'journal' ? "Search voucher, ledger, narration..." : "Search entries..."}
+            placeholder="Search voucher, accounts, narration..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg"
@@ -269,142 +206,81 @@ export function JournalEntryViewerEnhanced({ canManage }: JournalEntryViewerEnha
         <div className="bg-blue-50 rounded-lg p-4">
           <p className="text-sm text-blue-600">Total Debit</p>
           <p className="text-2xl font-bold text-blue-700">
-            Rp {(viewMode === 'journal' ? journalTotals.debit : voucherTotals.debit).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            Rp {totals.debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
         <div className="bg-green-50 rounded-lg p-4">
           <p className="text-sm text-green-600">Total Credit</p>
           <p className="text-2xl font-bold text-green-700">
-            Rp {(viewMode === 'journal' ? journalTotals.credit : voucherTotals.credit).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            Rp {totals.credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
       </div>
 
-      {/* Journal View (Flat - Tally Style) */}
-      {viewMode === 'journal' && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 sticky top-0">
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Date</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Voucher No</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Voucher Type</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Ledger</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Debit</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Credit</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Narration</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 bg-white">
-                {filteredFlatLines.map((line) => (
-                  <tr key={line.line_id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-3 py-2 whitespace-nowrap text-gray-900 border-r">
-                      {new Date(line.date).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap font-mono text-blue-600 border-r">
-                      {line.voucher_no}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap border-r">
-                      <span className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded">
-                        {line.voucher_type}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 border-r">
-                      <div className="font-medium text-gray-900">{line.ledger}</div>
-                      {line.customer_name && (
-                        <div className="text-xs text-blue-600">{line.customer_name}</div>
-                      )}
-                      {line.supplier_name && (
-                        <div className="text-xs text-purple-600">{line.supplier_name}</div>
-                      )}
-                      <div className="text-xs text-gray-500 font-mono">{line.account_code}</div>
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap border-r">
-                      {line.debit > 0 && (
-                        <span className="text-blue-700 font-medium">
-                          {line.debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap border-r">
-                      {line.credit > 0 && (
-                        <span className="text-green-700 font-medium">
-                          {line.credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-gray-600 text-xs max-w-xs">
-                      {line.narration || '-'}
-                    </td>
-                  </tr>
-                ))}
-                {filteredFlatLines.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      No journal entries found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-              <tfoot className="bg-gray-50 font-bold">
-                <tr>
-                  <td colSpan={4} className="px-3 py-2 text-right">Total:</td>
-                  <td className="px-3 py-2 text-right text-blue-700">
-                    {journalTotals.debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-3 py-2 text-right text-green-700">
-                    {journalTotals.credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Voucher View (Grouped) */}
-      {viewMode === 'voucher' && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
+      {/* Journal Voucher View (Tally Style) - One row per voucher */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 sticky top-0">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Entry No</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Debit</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Credit</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">View</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Date</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Journal No</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Type</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Debit Account</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Credit Account</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Amount</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r">Narration</th>
+                <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
-              {filteredEntries.map(entry => (
-                <tr key={entry.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-sm">{entry.entry_number}</td>
-                  <td className="px-4 py-3">{new Date(entry.entry_date).toLocaleDateString('id-ID')}</td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs">
-                      {entry.source_module ? sourceModuleLabels[entry.source_module] || entry.source_module : 'Manual'}
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {filteredVouchers.map((voucher) => (
+                <tr key={voucher.journal_entry_id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-900 border-r">
+                    {new Date(voucher.date).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap font-mono text-blue-600 border-r">
+                    {voucher.voucher_no}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap border-r">
+                    <span className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded">
+                      {voucher.voucher_type}
                     </span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-sm">{entry.reference_number || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">{entry.description || '-'}</td>
-                  <td className="px-4 py-3 text-right text-blue-600">Rp {entry.total_debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className="px-4 py-3 text-right text-green-600">Rp {entry.total_credit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => handleViewEntry(entry)}
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      <FileText className="w-4 h-4" />
-                    </button>
+                  <td className="px-3 py-2 border-r">
+                    <div className="text-xs text-gray-900 max-w-xs truncate">
+                      {voucher.debit_account || '-'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 border-r">
+                    <div className="text-xs text-gray-900 max-w-xs truncate">
+                      {voucher.credit_account || '-'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap border-r">
+                    <span className="text-gray-900 font-medium">
+                      Rp {voucher.amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-gray-600 text-xs border-r">
+                    <div className="max-w-md truncate">
+                      {voucher.narration || '-'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {voucher.is_multi_line && (
+                      <button
+                        onClick={() => handleViewVoucher(voucher)}
+                        className="text-blue-600 hover:text-blue-800"
+                        title="View detailed breakdown"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
-              {filteredEntries.length === 0 && (
+              {filteredVouchers.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                     No journal entries found
@@ -412,9 +288,18 @@ export function JournalEntryViewerEnhanced({ canManage }: JournalEntryViewerEnha
                 </tr>
               )}
             </tbody>
+            <tfoot className="bg-gray-50 font-bold">
+              <tr>
+                <td colSpan={5} className="px-3 py-2 text-right">Total:</td>
+                <td className="px-3 py-2 text-right text-gray-900 border-r">
+                  Rp {totals.debit.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+                <td colSpan={2}></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
-      )}
+      </div>
 
       {/* Voucher Detail Modal */}
       <Modal isOpen={viewModalOpen} onClose={() => setViewModalOpen(false)} title={`Journal Entry: ${selectedEntry?.entry_number}`}>
