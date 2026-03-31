@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
-import { DataTable } from '../components/DataTable';
 import { Modal } from '../components/Modal';
 import { FileUpload } from '../components/FileUpload';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Plus, Edit, Trash2, AlertTriangle, Package, DollarSign, FileText, ExternalLink } from 'lucide-react';
+import { Plus, Edit, Trash2, AlertTriangle, Package, DollarSign, FileText, ExternalLink, Search, ChevronDown, ChevronRight, Archive, Eye, EyeOff, ExternalLink as LinkIcon } from 'lucide-react';
+import { ProformaInvoiceView } from '../components/ProformaInvoiceView';
+import { DeliveryChallanView } from '../components/DeliveryChallanView';
+import { InvoiceView } from '../components/InvoiceView';
 import { showToast } from '../components/ToastNotification';
 import { showConfirm } from '../components/ConfirmDialog';
 import { formatDate } from '../utils/dateFormat';
@@ -82,10 +84,17 @@ export function Batches() {
   const [transactionHistoryModal, setTransactionHistoryModal] = useState(false);
   const [selectedBatchDocs, setSelectedBatchDocs] = useState<BatchDocument[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
-  const [selectedProductForHistory, setSelectedProductForHistory] = useState<{id: string; name: string; code: string} | null>(null);
+  const [selectedProductForHistory, setSelectedProductForHistory] = useState<{id: string; name: string; code: string; batchId?: string; batchNumber?: string} | null>(null);
   const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const [batchSearch, setBatchSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
+  const [quickViewSO, setQuickViewSO] = useState<{ order: any; items: any[] } | null>(null);
+  const [quickViewDC, setQuickViewDC] = useState<{ challan: any; items: any[] } | null>(null);
+  const [quickViewInvoice, setQuickViewInvoice] = useState<{ invoice: any; items: any[] } | null>(null);
+  const [companySettings, setCompanySettings] = useState<any>(null);
   const [formData, setFormData] = useState({
     batch_number: '',
     product_id: '',
@@ -111,18 +120,69 @@ export function Batches() {
     loadBatches();
     loadProducts();
     loadImportContainers();
+    loadCompanySettings();
   }, []);
+
+  const loadCompanySettings = async () => {
+    const { data } = await supabase.from('settings').select('*').maybeSingle();
+    if (data) setCompanySettings(data);
+  };
+
+  const openQuickViewSO = async (soNumber: string) => {
+    const { data: order } = await supabase
+      .from('sales_orders')
+      .select(`*, customers(company_name, address, city, phone, npwp, pharmacy_license, gst_vat_type)`)
+      .eq('so_number', soNumber)
+      .maybeSingle();
+    if (!order) return;
+    const { data: items } = await supabase
+      .from('sales_order_items')
+      .select(`*, products(product_name, product_code, unit)`)
+      .eq('sales_order_id', order.id);
+    setQuickViewSO({ order, items: items || [] });
+  };
+
+  const openQuickViewDC = async (challanNumber: string) => {
+    const { data: challan } = await supabase
+      .from('delivery_challans')
+      .select(`*, customers(company_name, address, city, phone, npwp, pharmacy_license, gst_vat_type)`)
+      .eq('challan_number', challanNumber)
+      .maybeSingle();
+    if (!challan) return;
+    const { data: items } = await supabase
+      .from('delivery_challan_items')
+      .select(`*, products(product_name, product_code, unit), batches(batch_number)`)
+      .eq('challan_id', challan.id);
+    setQuickViewDC({ challan, items: items || [] });
+  };
+
+  const openQuickViewInvoice = async (invoiceNumber: string) => {
+    const { data: invoice } = await supabase
+      .from('sales_invoices')
+      .select(`*, customers(company_name, address, city, phone, npwp, pharmacy_license, gst_vat_type)`)
+      .eq('invoice_number', invoiceNumber)
+      .maybeSingle();
+    if (!invoice) return;
+    const { data: items } = await supabase
+      .from('sales_invoice_items')
+      .select(`*, products(product_name, product_code, unit), batches(batch_number)`)
+      .eq('invoice_id', invoice.id);
+    setQuickViewInvoice({ invoice, items: items || [] });
+  };
 
   const loadBatches = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('batches')
         .select(`
           *,
           products(product_name, product_code, unit),
-          import_containers(container_ref)
+          import_containers(container_ref),
+          stock_reservations(id, reserved_quantity, status, sales_orders(so_number))
         `)
         .order('import_date', { ascending: false });
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -133,7 +193,9 @@ export function Batches() {
             .select('*', { count: 'exact', head: true })
             .eq('batch_id', batch.id);
 
-          return { ...batch, document_count: count || 0 };
+          const activeReservations = (batch.stock_reservations || []).filter((r: any) => r.status === 'active');
+
+          return { ...batch, document_count: count || 0, active_reservations: activeReservations };
         })
       );
 
@@ -336,9 +398,15 @@ export function Batches() {
       setModalOpen(false);
       resetForm();
       loadBatches();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving batch:', error);
-      showToast({ type: 'error', title: 'Error', message: 'Failed to save batch. Please try again.' });
+      let msg = 'Failed to save batch. Please try again.';
+      if (error?.message?.includes('duplicate') || error?.code === '23505') {
+        msg = 'A batch with this batch number already exists. Please use a different batch number.';
+      } else if (error?.message) {
+        msg = error.message;
+      }
+      showToast({ type: 'error', title: 'Error', message: msg });
     }
   };
 
@@ -513,57 +581,168 @@ export function Batches() {
     });
   };
 
-  const showTransactionHistory = async (productId: string, productName: string, productCode: string) => {
-    setSelectedProductForHistory({ id: productId, name: productName, code: productCode });
+  const showTransactionHistory = async (productId: string, productName: string, productCode: string, batchId?: string, batchNumber?: string) => {
+    setSelectedProductForHistory({ id: productId, name: productName, code: productCode, batchId, batchNumber });
     setTransactionHistoryModal(true);
 
-    // Load transaction history for this product
-    const { data: txns, error } = await supabase
+    let txnQuery = supabase
       .from('inventory_transactions')
       .select('*')
-      .eq('product_id', productId)
       .order('transaction_date', { ascending: false })
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error loading transaction history:', error);
-      showToast({ type: 'error', title: 'Error', message: 'Error loading transaction history: ' + error.message });
+    if (batchId) {
+      txnQuery = txnQuery.eq('batch_id', batchId);
+    } else {
+      txnQuery = txnQuery.eq('product_id', productId);
+    }
+
+    const [txnResult, resResult] = await Promise.all([
+      txnQuery,
+      batchId
+        ? supabase
+            .from('stock_reservations')
+            .select('id, reserved_quantity, status, reserved_at, is_released, released_at, release_reason, sales_orders(so_number, customers(company_name))')
+            .eq('batch_id', batchId)
+            .order('reserved_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (txnResult.error) {
+      console.error('Error loading transaction history:', txnResult.error);
+      showToast({ type: 'error', title: 'Error', message: 'Error loading transaction history: ' + txnResult.error.message });
       return;
     }
 
-    // Load related data separately
-    const enrichedData = await Promise.all((txns || []).map(async (txn) => {
+    const enrichedTxns = await Promise.all((txnResult.data || []).map(async (txn) => {
       let dcData = null;
       let soData = null;
+      let customerData = null;
+      let invoiceData = null;
 
-      // Get DC data if reference is a delivery challan
+      // For DC-type transactions
       if (txn.reference_number && txn.reference_number.startsWith('DO-')) {
         const { data: dc } = await supabase
           .from('delivery_challans')
-          .select('challan_number, customer_id, customers(customer_name)')
+          .select('challan_number, sales_order_id, customer_id, customers(company_name), sales_orders(so_number)')
           .eq('challan_number', txn.reference_number)
-          .single();
+          .maybeSingle();
         dcData = dc;
+        if (dc?.customers) customerData = dc.customers;
+        if (dc?.sales_orders) soData = dc.sales_orders;
       }
 
-      // Get SO data if sales_order_id exists
-      if (txn.sales_order_id) {
+      // For sale transactions via invoice — look up via reference_id (sales_invoice_item id)
+      if (txn.transaction_type === 'sale' && txn.reference_type === 'sales_invoice_item' && txn.reference_id) {
+        const { data: sii } = await supabase
+          .from('sales_invoice_items')
+          .select(`
+            delivery_challan_item_id,
+            invoice_id,
+            sales_invoices(invoice_number, sales_order_id, customer_id, customers(company_name), sales_orders(so_number)),
+            delivery_challan_items(challan_id, delivery_challans(challan_number, sales_order_id, sales_orders(so_number)))
+          `)
+          .eq('id', txn.reference_id)
+          .maybeSingle();
+
+        if (sii) {
+          const si = sii.sales_invoices as any;
+          if (si?.customers) customerData = si.customers;
+          if (si?.sales_orders) soData = si.sales_orders;
+          invoiceData = { invoice_number: si?.invoice_number };
+          const dci = sii.delivery_challan_items as any;
+          if (dci?.delivery_challans) {
+            dcData = dci.delivery_challans;
+            if (!soData && dci.delivery_challans.sales_orders) soData = dci.delivery_challans.sales_orders;
+          }
+        }
+      }
+
+      // Direct SO lookup if we have sales_order_id on the transaction
+      if (!soData && txn.sales_order_id) {
         const { data: so } = await supabase
           .from('sales_orders')
-          .select('so_number, customer_id, customers(customer_name)')
+          .select('so_number, customer_id, customers(company_name)')
           .eq('id', txn.sales_order_id)
-          .single();
+          .maybeSingle();
         soData = so;
+        if (so?.customers) customerData = so.customers;
       }
 
       return {
         ...txn,
         delivery_challans: dcData,
-        sales_orders: soData
+        sales_orders: soData,
+        customer: customerData,
+        invoice: invoiceData,
+        _type: 'transaction' as const
       };
     }));
 
-    setTransactionHistory(enrichedData);
+    const reservationEntries = (resResult.data || []).map((r: any) => ({
+      id: r.id,
+      _type: 'reservation' as const,
+      quantity: r.reserved_quantity,
+      status: r.status,
+      is_released: r.is_released,
+      released_at: r.released_at,
+      release_reason: r.release_reason,
+      created_at: r.reserved_at,
+      transaction_date: r.reserved_at?.split('T')[0] || '',
+      transaction_type: r.status === 'active' ? 'reserved' : 'reservation_released',
+      so_number: r.sales_orders?.so_number,
+      customer_name: r.sales_orders?.customers?.company_name,
+    }));
+
+    const combined = [...enrichedTxns, ...reservationEntries].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    setTransactionHistory(combined);
+  };
+
+  const toggleProduct = (productId: string) => {
+    setExpandedProducts(prev => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  };
+
+  const handleArchiveBatch = async (batchId: string) => {
+    const confirmed = await showConfirm({
+      title: 'Archive Batch',
+      message: 'This batch has 0 stock. Archive it to hide from the active list?',
+      confirmText: 'Archive',
+      cancelText: 'Cancel',
+    });
+    if (!confirmed) return;
+    try {
+      const { error } = await supabase
+        .from('batches')
+        .update({ is_active: false })
+        .eq('id', batchId);
+      if (error) throw error;
+      showToast({ type: 'success', title: 'Archived', message: 'Batch archived successfully' });
+      await loadBatches();
+    } catch (error: any) {
+      showToast({ type: 'error', title: 'Error', message: error?.message || 'Failed to archive batch' });
+    }
+  };
+
+  const handleUnarchiveBatch = async (batchId: string) => {
+    try {
+      const { error } = await supabase
+        .from('batches')
+        .update({ is_active: true })
+        .eq('id', batchId);
+      if (error) throw error;
+      showToast({ type: 'success', title: 'Restored', message: 'Batch restored successfully' });
+      await loadBatches();
+    } catch (error: any) {
+      showToast({ type: 'error', title: 'Error', message: error?.message || 'Failed to restore batch' });
+    }
   };
 
   const isLowStock = (batch: Batch) => batch.current_stock < batch.import_quantity * 0.2;
@@ -610,185 +789,6 @@ export function Batches() {
     return `Rp ${amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const columns = [
-    { key: 'batch_number', label: 'Batch Number' },
-    {
-      key: 'product',
-      label: 'Product',
-      render: (value: any, batch: Batch) => (
-        <div>
-          <button
-            onClick={() => showTransactionHistory(batch.product_id, batch.products?.product_name || '', batch.products?.product_code || '')}
-            className="font-medium text-blue-600 hover:text-blue-800 hover:underline text-left"
-          >
-            {batch.products?.product_name}
-          </button>
-          {batch.products?.product_code && (
-            <div className="text-xs text-gray-500">{batch.products.product_code}</div>
-          )}
-        </div>
-      )
-    },
-    {
-      key: 'import_date',
-      label: 'Import Date',
-      render: (value: any, batch: Batch) => formatDate(batch.import_date)
-    },
-    {
-      key: 'stock',
-      label: 'Stock',
-      render: (value: any, batch: Batch) => {
-        const freeStock = batch.current_stock - (batch.reserved_stock || 0);
-        return (
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className={isLowStock(batch) ? 'text-orange-600 font-semibold' : 'font-medium'}>
-                {batch.current_stock} {batch.products?.unit}
-              </span>
-              {isLowStock(batch) && (
-                <AlertTriangle className="w-4 h-4 text-orange-600" />
-              )}
-            </div>
-            {batch.reserved_stock > 0 && (
-              <div className="text-xs space-y-0.5">
-                <div className="text-amber-600">
-                  Reserved: {batch.reserved_stock} {batch.products?.unit}
-                </div>
-                <div className="text-green-600">
-                  Free: {freeStock} {batch.products?.unit}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      }
-    },
-    {
-      key: 'pricing',
-      label: 'Import Price',
-      render: (value: any, batch: Batch) => (
-        <div className="text-sm">
-          {batch.import_price_usd && batch.exchange_rate_usd_to_idr ? (
-            <>
-              <div className="font-medium text-green-700">
-                {formatCurrency(batch.import_price_usd, 'USD')}
-              </div>
-              <div className="text-xs text-gray-500">
-                {formatCurrency(batch.import_price)}
-              </div>
-              <div className="text-xs text-gray-400">
-                @ {batch.exchange_rate_usd_to_idr.toLocaleString()}
-              </div>
-            </>
-          ) : (
-            <div className="text-gray-500">{formatCurrency(batch.import_price)}</div>
-          )}
-        </div>
-      )
-    },
-    {
-      key: 'landed_cost',
-      label: 'Landed Cost',
-      render: (value: any, batch: Batch) => {
-        const hasContainer = batch.import_cost_allocated && batch.import_cost_allocated > 0;
-        const landedCostPerUnit = batch.landed_cost_per_unit || batch.import_price;
-        const containerPerUnit = hasContainer ? (batch.import_cost_allocated / batch.import_quantity) : 0;
-
-        return (
-          <div className="text-sm">
-            {batch.import_price_usd && batch.exchange_rate_usd_to_idr ? (
-              <>
-                <div className="font-medium text-blue-700">
-                  {formatCurrency(landedCostPerUnit / batch.exchange_rate_usd_to_idr, 'USD')}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {formatCurrency(landedCostPerUnit)}
-                </div>
-                {hasContainer && (
-                  <div className="text-xs text-green-600">
-                    +Container: {formatCurrency(containerPerUnit)}
-                  </div>
-                )}
-                <div className="text-xs text-gray-400">
-                  @ {batch.exchange_rate_usd_to_idr.toLocaleString('id-ID')}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="font-medium text-blue-700">
-                  {formatCurrency(landedCostPerUnit)}
-                </div>
-                {hasContainer && (
-                  <div className="text-xs text-green-600">
-                    +Container: {formatCurrency(containerPerUnit)}
-                  </div>
-                )}
-              </>
-            )}
-            {batch.import_containers?.container_ref && (
-              <div className="text-xs text-gray-400">
-                {batch.import_containers.container_ref}
-              </div>
-            )}
-            {batch.cost_locked && (
-              <div className="text-xs text-amber-600 font-medium">🔒 Locked</div>
-            )}
-          </div>
-        );
-      }
-    },
-    {
-      key: 'expiry_date',
-      label: 'Expiry Date',
-      render: (value: any, batch: Batch) => (
-        <span className={
-          isExpired(batch) ? 'text-red-700 font-semibold' :
-          isNearExpiry(batch) ? 'text-orange-600 font-semibold' : ''
-        }>
-          {batch.expiry_date ? formatDate(batch.expiry_date) : 'N/A'}
-        </span>
-      )
-    },
-    {
-      key: 'documents',
-      label: 'Docs',
-      render: (value: any, batch: Batch) => (
-        <button
-          onClick={() => loadBatchDocuments(batch.id)}
-          className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition"
-        >
-          <FileText className="w-4 h-4" />
-          <span className="text-sm font-medium">{batch.document_count || 0}</span>
-        </button>
-      )
-    },
-    {
-      key: 'total_cost',
-      label: 'Total Cost',
-      render: (value: any, batch: Batch) => {
-        const totalCostIDR = batch.import_price * batch.import_quantity;
-        const totalCostUSD = batch.import_price_usd ? batch.import_price_usd * batch.import_quantity : null;
-
-        return (
-          <div className="text-sm">
-            {totalCostUSD && batch.exchange_rate_usd_to_idr ? (
-              <>
-                <div className="font-semibold text-green-700">
-                  {formatCurrency(totalCostUSD, 'USD')}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {formatCurrency(totalCostIDR)}
-                </div>
-              </>
-            ) : (
-              <div className="font-semibold">{formatCurrency(totalCostIDR)}</div>
-            )}
-          </div>
-        );
-      }
-    },
-  ];
-
   const canEdit = profile?.role === 'admin' || profile?.role === 'warehouse' || profile?.role === 'accounts';
 
   return (
@@ -813,63 +813,323 @@ export function Batches() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white rounded-lg shadow p-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Total Batches</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">{batches.length}</p>
+                <p className="text-xs text-gray-500">Active Batches</p>
+                <p className="text-xl font-bold text-gray-900 mt-0.5">{batches.filter(b => b.is_active).length}</p>
               </div>
-              <Package className="w-8 h-8 text-blue-600" />
+              <Package className="w-6 h-6 text-blue-600" />
             </div>
           </div>
-
-          <div className="bg-orange-50 rounded-lg shadow p-6">
+          <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-orange-600">Low Stock</p>
-                <p className="text-2xl font-bold text-orange-600 mt-1">
-                  {batches.filter(isLowStock).length}
-                </p>
+                <p className="text-xs text-gray-500">Sold Out</p>
+                <p className="text-xl font-bold text-orange-600 mt-0.5">{batches.filter(b => b.is_active && b.current_stock <= 0).length}</p>
               </div>
-              <AlertTriangle className="w-8 h-8 text-orange-600" />
+              <Archive className="w-6 h-6 text-orange-500" />
             </div>
           </div>
-
-          <div className="bg-red-50 rounded-lg shadow p-6">
+          <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-red-600">Near Expiry</p>
-                <p className="text-2xl font-bold text-red-600 mt-1">
-                  {batches.filter(isNearExpiry).length}
-                </p>
+                <p className="text-xs text-gray-500">Low Stock</p>
+                <p className="text-xl font-bold text-amber-600 mt-0.5">{batches.filter(b => b.is_active && isLowStock(b) && b.current_stock > 0).length}</p>
               </div>
-              <AlertTriangle className="w-8 h-8 text-red-600" />
+              <AlertTriangle className="w-6 h-6 text-amber-500" />
+            </div>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-500">Near Expiry</p>
+                <p className="text-xl font-bold text-red-600 mt-0.5">{batches.filter(b => b.is_active && isNearExpiry(b)).length}</p>
+              </div>
+              <AlertTriangle className="w-6 h-6 text-red-500" />
             </div>
           </div>
         </div>
 
-        <DataTable
-          columns={columns}
-          data={batches}
-          loading={loading}
-          actions={canEdit ? (batch) => (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => handleEdit(batch)}
-                className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-              >
-                <Edit className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => handleDelete(batch.id)}
-                className="p-1 text-red-600 hover:bg-red-50 rounded"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+        {/* Batches Table - Grouped by Product */}
+        <div className="bg-white rounded-lg shadow">
+          <div className="p-3 border-b border-gray-200 flex items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={batchSearch}
+                onChange={(e) => setBatchSearch(e.target.value)}
+                placeholder="Search batches..."
+                className="w-full pl-9 pr-4 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+              />
             </div>
-          ) : undefined}
-        />
+            <button
+              onClick={() => setShowArchived(!showArchived)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${showArchived ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              {showArchived ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              {showArchived ? 'Hide Archived' : 'Show Archived'}
+            </button>
+            <button
+              onClick={() => {
+                if (expandedProducts.size > 0) setExpandedProducts(new Set());
+                else {
+                  const allIds = new Set(batches.map(b => b.product_id));
+                  setExpandedProducts(allIds);
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+            >
+              {expandedProducts.size > 0 ? 'Collapse All' : 'Expand All'}
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="p-8 text-center">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto" />
+              <p className="mt-3 text-gray-500 text-sm">Loading batches...</p>
+            </div>
+          ) : (() => {
+            const filtered = batches.filter(batch => {
+              const isArchived = !batch.is_active;
+              if (!showArchived && isArchived) return false;
+              if (!batchSearch) return true;
+              const q = batchSearch.toLowerCase();
+              return (
+                batch.batch_number?.toLowerCase().includes(q) ||
+                batch.products?.product_name?.toLowerCase().includes(q) ||
+                batch.products?.product_code?.toLowerCase().includes(q)
+              );
+            });
+
+            const grouped = new Map<string, { productName: string; productCode: string; unit: string; productId: string; batches: typeof filtered }>();
+            filtered.forEach(batch => {
+              const key = batch.product_id;
+              if (!grouped.has(key)) {
+                grouped.set(key, {
+                  productName: batch.products?.product_name || '',
+                  productCode: batch.products?.product_code || '',
+                  unit: batch.products?.unit || 'kg',
+                  productId: key,
+                  batches: [],
+                });
+              }
+              grouped.get(key)!.batches.push(batch);
+            });
+
+            const sortedGroups = Array.from(grouped.values()).sort((a, b) => {
+              const aStock = a.batches.reduce((s, bt) => s + bt.current_stock, 0);
+              const bStock = b.batches.reduce((s, bt) => s + bt.current_stock, 0);
+              if (aStock > 0 && bStock <= 0) return -1;
+              if (aStock <= 0 && bStock > 0) return 1;
+              return a.productName.localeCompare(b.productName);
+            });
+
+            if (sortedGroups.length === 0) {
+              return (
+                <div className="px-6 py-8 text-center text-gray-400 text-sm">
+                  {batchSearch ? 'No batches match your search.' : 'No batches found.'}
+                </div>
+              );
+            }
+
+            return (
+              <div>
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="pl-3 pr-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-8"></th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Product Name</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Code</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">Batches</th>
+                      <th className="px-2 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Sold / Res</th>
+                      <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-28 pr-3">Stock</th>
+                    </tr>
+                  </thead>
+                </table>
+                {sortedGroups.map(group => {
+                  const isExpanded = expandedProducts.has(group.productId) || !!batchSearch;
+                  const totalStock = group.batches.reduce((s, b) => s + b.current_stock, 0);
+                  const activeBatches = group.batches.filter(b => b.is_active);
+                  const totalSold = group.batches.reduce((s, b) => s + (b.import_quantity - b.current_stock), 0);
+                  const totalReserved = group.batches.reduce((s, b) => s + (b.reserved_stock || 0), 0);
+                  const zeroStockActive = activeBatches.filter(b => b.current_stock <= 0).length;
+
+                  return (
+                    <div key={group.productId} className="border-b border-gray-200 last:border-b-0">
+                      <button
+                        onClick={() => toggleProduct(group.productId)}
+                        className="w-full hover:bg-gray-50 transition text-left"
+                      >
+                        <table className="w-full text-sm">
+                          <tbody>
+                            <tr>
+                              <td className="pl-3 pr-2 py-2 w-8">
+                                {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                              </td>
+                              <td className="px-2 py-2">
+                                <span className="font-semibold text-gray-900">{group.productName}</span>
+                              </td>
+                              <td className="px-2 py-2 w-28 text-xs text-gray-400">{group.productCode}</td>
+                              <td className="px-2 py-2 w-20 text-center">
+                                <span className="text-xs text-blue-700 font-medium">{activeBatches.length}</span>
+                                {zeroStockActive > 0 && (
+                                  <span className="text-[10px] text-orange-500 ml-1">({zeroStockActive} out)</span>
+                                )}
+                              </td>
+                              <td className="px-2 py-2 w-28 text-center">
+                                <span className="text-xs text-gray-600">{totalSold.toLocaleString()}</span>
+                                {totalReserved > 0 && (
+                                  <span className="text-xs text-amber-600 ml-1">/ {totalReserved.toLocaleString()}</span>
+                                )}
+                              </td>
+                              <td className={`px-2 py-2 w-28 text-right pr-3 text-sm font-semibold ${totalStock > 0 ? 'text-gray-900' : 'text-red-500'}`}>
+                                {totalStock.toLocaleString()} {group.unit}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-3 py-1.5 text-left font-semibold text-gray-500 uppercase tracking-wider">Batch #</th>
+                                <th className="px-3 py-1.5 text-left font-semibold text-gray-500 uppercase tracking-wider w-24">Import</th>
+                                <th className="px-3 py-1.5 text-right font-semibold text-gray-500 uppercase tracking-wider w-20">Stock</th>
+                                <th className="px-3 py-1.5 text-right font-semibold text-gray-500 uppercase tracking-wider w-16">Res</th>
+                                <th className="px-3 py-1.5 text-right font-semibold text-gray-500 uppercase tracking-wider w-16">Free</th>
+                                <th className="px-3 py-1.5 text-right font-semibold text-gray-500 uppercase tracking-wider w-32">Price/unit</th>
+                                <th className="px-3 py-1.5 text-right font-semibold text-gray-500 uppercase tracking-wider w-36">Landed/unit</th>
+                                <th className="px-3 py-1.5 text-left font-semibold text-gray-500 uppercase tracking-wider w-24">Expiry</th>
+                                <th className="px-3 py-1.5 text-center font-semibold text-gray-500 uppercase tracking-wider w-10">D</th>
+                                <th className="px-3 py-1.5 text-right font-semibold text-gray-500 uppercase tracking-wider">Container</th>
+                                {canEdit && <th className="px-3 py-1.5 text-center font-semibold text-gray-500 uppercase tracking-wider w-24"></th>}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.batches
+                                .sort((a, b) => new Date(b.import_date).getTime() - new Date(a.import_date).getTime())
+                                .map(batch => {
+                                  const freeStock = batch.current_stock - (batch.reserved_stock || 0);
+                                  const landedCostPerUnit = batch.landed_cost_per_unit || batch.import_price;
+                                  const containerPerUnit = (batch.import_cost_allocated && batch.import_quantity > 0) ? batch.import_cost_allocated / batch.import_quantity : 0;
+                                  const fullLandedIDR = landedCostPerUnit + containerPerUnit;
+                                  const hasUSD = batch.import_price_usd && batch.exchange_rate_usd_to_idr;
+                                  const isArchived = !batch.is_active;
+                                  const isSoldOut = batch.current_stock <= 0 && batch.is_active;
+
+                                  return (
+                                    <tr key={batch.id} className={`border-t border-gray-100 hover:bg-gray-50 ${isArchived ? 'opacity-50 bg-gray-50' : isSoldOut ? 'bg-orange-50/30' : ''}`}>
+                                      <td className="px-3 py-1.5">
+                                        <button
+                                          onClick={() => showTransactionHistory(batch.product_id, batch.products?.product_name || '', batch.products?.product_code || '', batch.id, batch.batch_number)}
+                                          className="font-mono text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                        >
+                                          {batch.batch_number}
+                                        </button>
+                                        {isArchived && <span className="ml-1.5 text-[10px] text-gray-400 bg-gray-200 px-1 rounded">archived</span>}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{formatDate(batch.import_date)}</td>
+                                      <td className="px-3 py-1.5 text-right">
+                                        <span className={`font-semibold ${batch.current_stock <= 0 ? 'text-red-500' : isLowStock(batch) ? 'text-orange-600' : 'text-gray-900'}`}>
+                                          {batch.current_stock.toLocaleString()}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right">
+                                        {batch.reserved_stock > 0 ? (
+                                          <span className="text-amber-600 font-medium">{batch.reserved_stock.toLocaleString()}</span>
+                                        ) : (
+                                          <span className="text-gray-300">-</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right">
+                                        <span className={`font-semibold ${freeStock <= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                          {freeStock.toLocaleString()}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right">
+                                        {hasUSD ? (
+                                          <div>
+                                            <span className="text-green-700 font-medium">{formatCurrency(batch.import_price_usd!, 'USD')}</span>
+                                            <div className="text-[10px] text-gray-400">{formatCurrency(batch.import_price)} @ {batch.exchange_rate_usd_to_idr!.toLocaleString('id-ID')}</div>
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-700 font-medium">{formatCurrency(batch.import_price)}</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right">
+                                        {hasUSD ? (
+                                          <div>
+                                            <span className="text-blue-700 font-medium">{formatCurrency(fullLandedIDR / batch.exchange_rate_usd_to_idr!, 'USD')}</span>
+                                            <div className="text-[10px] text-gray-500">{formatCurrency(fullLandedIDR)}</div>
+                                            {containerPerUnit > 0 && (
+                                              <div className="text-[10px] text-gray-400">incl. ctr {formatCurrency(containerPerUnit)}/u</div>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div>
+                                            <span className="text-blue-700 font-medium">{formatCurrency(fullLandedIDR)}</span>
+                                            {containerPerUnit > 0 && (
+                                              <div className="text-[10px] text-gray-400">incl. ctr {formatCurrency(containerPerUnit)}/u</div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-1.5 whitespace-nowrap">
+                                        <span className={isExpired(batch) ? 'text-red-600 font-semibold' : isNearExpiry(batch) ? 'text-orange-500 font-semibold' : 'text-gray-600'}>
+                                          {batch.expiry_date ? formatDate(batch.expiry_date) : '—'}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-1.5 text-center">
+                                        <button onClick={() => loadBatchDocuments(batch.id)} className="text-blue-600 hover:text-blue-800" title="Documents">
+                                          <FileText className="w-3 h-3 inline" />
+                                          <span className="ml-0.5">{batch.document_count || 0}</span>
+                                        </button>
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right text-gray-400 text-[10px] truncate max-w-[130px]">
+                                        {batch.import_containers?.container_ref || '—'}
+                                      </td>
+                                      {canEdit && (
+                                        <td className="px-3 py-1.5 text-center">
+                                          <div className="flex items-center justify-center gap-0.5">
+                                            <button onClick={() => handleEdit(batch)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                                              <Edit className="w-3 h-3" />
+                                            </button>
+                                            {isSoldOut && (
+                                              <button onClick={() => handleArchiveBatch(batch.id)} className="p-1 text-gray-500 hover:bg-gray-100 rounded" title="Archive">
+                                                <Archive className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                            {isArchived && (
+                                              <button onClick={() => handleUnarchiveBatch(batch.id)} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Restore">
+                                                <Eye className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                            <button onClick={() => handleDelete(batch.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Delete">
+                                              <Trash2 className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        </td>
+                                      )}
+                                    </tr>
+                                  );
+                                })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
 
         {/* Summary Section */}
         {batches.length > 0 && (
@@ -1430,74 +1690,184 @@ export function Batches() {
             setSelectedProductForHistory(null);
             setTransactionHistory([]);
           }}
-          title={`Transaction History - ${selectedProductForHistory?.name || ''} (${selectedProductForHistory?.code || ''})`}
+          title={`Transaction History - ${selectedProductForHistory?.name || ''} ${selectedProductForHistory?.batchNumber ? `[${selectedProductForHistory.batchNumber}]` : `(${selectedProductForHistory?.code || ''})`}`}
         >
           <div className="space-y-3 max-h-[600px] overflow-y-auto">
-            {transactionHistory.length > 0 ? (
-              <div className="space-y-2">
-                {transactionHistory.map((txn, idx) => (
-                  <div
-                    key={txn.id}
-                    className={`p-3 rounded-lg border-l-4 ${
-                      parseFloat(txn.quantity) > 0
-                        ? 'bg-green-50 border-green-500'
-                        : 'bg-red-50 border-red-500'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`font-semibold ${
-                            parseFloat(txn.quantity) > 0 ? 'text-green-700' : 'text-red-700'
-                          }`}>
-                            {parseFloat(txn.quantity) > 0 ? '+' : ''}{parseFloat(txn.quantity).toFixed(3)}
-                          </span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-700 uppercase">
-                            {txn.transaction_type.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-600 space-y-0.5">
-                          <div><strong>Date:</strong> {formatDate(txn.transaction_date)}</div>
-                          {txn.reference_number && (
-                            <div><strong>Reference:</strong> {txn.reference_number}</div>
-                          )}
-                          {txn.reference_type === 'delivery_challan' && txn.delivery_challans && (
-                            <div className="text-xs text-blue-600">
-                              DC: {txn.delivery_challans.challan_number}
-                              {txn.delivery_challans.customers && (
-                                <span className="ml-1">→ {txn.delivery_challans.customers.customer_name}</span>
-                              )}
-                            </div>
-                          )}
-                          {txn.sales_order_id && txn.sales_orders && (
-                            <div className="text-xs text-blue-600">
-                              SO: {txn.sales_orders.so_number}
-                              {txn.sales_orders.customers && (
-                                <span className="ml-1">→ {txn.sales_orders.customers.customer_name}</span>
-                              )}
-                            </div>
-                          )}
-                          {txn.notes && (
-                            <div className="text-xs text-gray-500 italic">{txn.notes}</div>
-                          )}
-                        </div>
+            {(() => {
+              const stockTxns = transactionHistory.filter((t: any) => t._type === 'transaction');
+              const resTxns = transactionHistory.filter((t: any) => t._type === 'reservation');
+              const activeRes = resTxns.filter((t: any) => t.status === 'active');
+              const totalIn = stockTxns.filter((t: any) => parseFloat(t.quantity) > 0).reduce((s: number, t: any) => s + parseFloat(t.quantity), 0);
+              const totalOut = stockTxns.filter((t: any) => parseFloat(t.quantity) < 0).reduce((s: number, t: any) => s + Math.abs(parseFloat(t.quantity)), 0);
+              const totalReserved = activeRes.reduce((s: number, t: any) => s + parseFloat(t.quantity), 0);
+              const currentStock = totalIn - totalOut;
+              const freeStock = currentStock - totalReserved;
+
+              return (
+                <>
+                  {selectedProductForHistory?.batchId && transactionHistory.length > 0 && (
+                    <div className="grid grid-cols-4 gap-2 mb-3">
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-2 text-center">
+                        <div className="text-xs text-green-600 font-medium">In</div>
+                        <div className="text-sm font-bold text-green-700">{totalIn.toLocaleString()}</div>
                       </div>
-                      <div className="text-right text-xs text-gray-400">
-                        {new Date(txn.created_at).toLocaleString()}
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-center">
+                        <div className="text-xs text-red-600 font-medium">Out</div>
+                        <div className="text-sm font-bold text-red-700">{totalOut.toLocaleString()}</div>
+                      </div>
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-center">
+                        <div className="text-xs text-amber-600 font-medium">Reserved</div>
+                        <div className="text-sm font-bold text-amber-700">{totalReserved.toLocaleString()}</div>
+                      </div>
+                      <div className={`${freeStock < 0 ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'} border rounded-lg p-2 text-center`}>
+                        <div className={`text-xs font-medium ${freeStock < 0 ? 'text-red-600' : 'text-blue-600'}`}>Free</div>
+                        <div className={`text-sm font-bold ${freeStock < 0 ? 'text-red-700' : 'text-blue-700'}`}>{freeStock.toLocaleString()}</div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )}
+                </>
+              );
+            })()}
+            {transactionHistory.length > 0 ? (
+              <div className="space-y-2">
+                {transactionHistory.map((txn: any) => {
+                  const isReservation = txn._type === 'reservation';
+                  const qty = parseFloat(txn.quantity);
+                  const isPositive = !isReservation && qty > 0;
+                  const isNegative = !isReservation && qty < 0;
+                  const isActiveRes = isReservation && txn.status === 'active';
+                  const isReleasedRes = isReservation && txn.status !== 'active';
+
+                  let bgClass = 'bg-gray-50 border-gray-300';
+                  let qtyColor = 'text-gray-700';
+                  if (isPositive) { bgClass = 'bg-green-50 border-green-500'; qtyColor = 'text-green-700'; }
+                  if (isNegative) { bgClass = 'bg-red-50 border-red-500'; qtyColor = 'text-red-700'; }
+                  if (isActiveRes) { bgClass = 'bg-amber-50 border-amber-500'; qtyColor = 'text-amber-700'; }
+                  if (isReleasedRes) { bgClass = 'bg-gray-50 border-gray-400'; qtyColor = 'text-gray-500'; }
+
+                  return (
+                    <div key={txn.id} className={`p-3 rounded-lg border-l-4 ${bgClass}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`font-semibold ${qtyColor}`}>
+                              {isReservation ? (isActiveRes ? `Res: ${qty.toLocaleString()}` : `Res Released: ${qty.toLocaleString()}`) : `${qty > 0 ? '+' : ''}${qty.toFixed(3)}`}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded uppercase ${
+                              isActiveRes ? 'bg-amber-200 text-amber-800' :
+                              isReleasedRes ? 'bg-gray-200 text-gray-600 line-through' :
+                              'bg-gray-200 text-gray-700'
+                            }`}>
+                              {txn.transaction_type.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-600 space-y-0.5">
+                            {txn.transaction_date && (
+                              <div><strong>Date:</strong> {formatDate(txn.transaction_date)}</div>
+                            )}
+                            {isReservation && txn.customer_name && (
+                              <div className="text-xs font-medium text-gray-700">
+                                Customer: {txn.customer_name}
+                              </div>
+                            )}
+                            {isReservation && isReleasedRes && txn.release_reason && (
+                              <div className="text-xs text-gray-500">Reason: {txn.release_reason}</div>
+                            )}
+                            {!isReservation && txn.reference_number && (
+                              <div className="flex items-center gap-1">
+                                <strong>Ref:</strong>
+                                {txn.transaction_type === 'sale' && txn.reference_number ? (
+                                  <button
+                                    onClick={() => openQuickViewInvoice(txn.reference_number)}
+                                    className="text-blue-600 hover:text-blue-800 hover:underline font-medium inline-flex items-center gap-0.5"
+                                  >
+                                    {txn.reference_number}
+                                    <ExternalLink className="w-3 h-3" />
+                                  </button>
+                                ) : (
+                                  <span>{txn.reference_number}</span>
+                                )}
+                              </div>
+                            )}
+                            {!isReservation && txn.customer?.company_name && (
+                              <div className="text-xs font-medium text-gray-700">
+                                Customer: {txn.customer.company_name}
+                              </div>
+                            )}
+                            {!isReservation && txn.sales_orders && (
+                              <button
+                                onClick={() => openQuickViewSO(txn.sales_orders.so_number)}
+                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-0.5"
+                              >
+                                SO: {txn.sales_orders.so_number}
+                                <ExternalLink className="w-3 h-3" />
+                              </button>
+                            )}
+                            {!isReservation && txn.delivery_challans && (
+                              <button
+                                onClick={() => openQuickViewDC(txn.delivery_challans.challan_number)}
+                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-0.5"
+                              >
+                                DO: {txn.delivery_challans.challan_number}
+                                <ExternalLink className="w-3 h-3" />
+                              </button>
+                            )}
+                            {isReservation && txn.so_number && (
+                              <button
+                                onClick={() => openQuickViewSO(txn.so_number)}
+                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-0.5"
+                              >
+                                SO: {txn.so_number}
+                                <ExternalLink className="w-3 h-3" />
+                              </button>
+                            )}
+                            {txn.notes && !txn.notes.includes('[backfilled]') && (
+                              <div className="text-xs text-gray-500 italic">{txn.notes}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right text-xs text-gray-400">
+                          {new Date(txn.created_at).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8 text-gray-500">
                 <Package className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <p>No transactions found for this product</p>
+                <p>No transactions found for this batch</p>
               </div>
             )}
           </div>
         </Modal>
       </div>
+
+      {quickViewSO && (
+        <ProformaInvoiceView
+          salesOrder={quickViewSO.order}
+          items={quickViewSO.items}
+          onClose={() => setQuickViewSO(null)}
+        />
+      )}
+
+      {quickViewDC && (
+        <DeliveryChallanView
+          challan={quickViewDC.challan}
+          items={quickViewDC.items}
+          onClose={() => setQuickViewDC(null)}
+          companySettings={companySettings}
+        />
+      )}
+
+      {quickViewInvoice && (
+        <InvoiceView
+          invoice={quickViewInvoice.invoice}
+          items={quickViewInvoice.items}
+          onClose={() => setQuickViewInvoice(null)}
+        />
+      )}
     </Layout>
   );
 }

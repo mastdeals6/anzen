@@ -5,7 +5,7 @@ import { Modal } from '../components/Modal';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Plus, Edit, Trash2, Upload, X } from 'lucide-react';
+import { Plus, CreditCard as Edit, Trash2, Upload, X } from 'lucide-react';
 import { showToast } from '../components/ToastNotification';
 import { showConfirm } from '../components/ConfirmDialog';
 
@@ -63,6 +63,8 @@ export function Products() {
     min_stock_level: '',
     duty_a1: '',
   });
+
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
 
   const [sources, setSources] = useState<ProductSource[]>([{
     source_name: '',
@@ -327,6 +329,7 @@ export function Products() {
 
   const resetForm = () => {
     setEditingProduct(null);
+    setDuplicateError(null);
     setFormData({
       product_name: '',
       hsn_code: '',
@@ -349,7 +352,6 @@ export function Products() {
 
       const dataToSave = {
         product_name: formData.product_name,
-        product_code: null,
         hsn_code: formData.hsn_code,
         category: formData.category,
         unit: formData.unit,
@@ -361,6 +363,27 @@ export function Products() {
       };
 
       let productId: string;
+
+      const { data: duplicates } = await supabase
+        .from('products')
+        .select('id, product_code, product_name, hsn_code')
+        .ilike('product_name', formData.product_name.trim())
+        .eq('is_active', true);
+
+      const existingDuplicate = (duplicates || []).find(d =>
+        d.product_name.toLowerCase() === formData.product_name.trim().toLowerCase() &&
+        d.hsn_code === formData.hsn_code.trim() &&
+        d.id !== editingProduct?.id
+      );
+
+      if (existingDuplicate) {
+        const msg = `A product named "${formData.product_name}" with HSN code "${formData.hsn_code}" already exists (${existingDuplicate.product_code || 'existing product'}). Please use a different name or HSN code.`;
+        setDuplicateError(msg);
+        showToast({ type: 'error', title: 'Duplicate Product', message: msg });
+        return;
+      }
+
+      setDuplicateError(null);
 
       if (editingProduct) {
         const { error } = await supabase
@@ -587,8 +610,8 @@ export function Products() {
                   type="text"
                   required
                   value={formData.product_name}
-                  onChange={(e) => setFormData({ ...formData, product_name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => { setFormData({ ...formData, product_name: e.target.value }); setDuplicateError(null); }}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${duplicateError ? 'border-red-500' : ''}`}
                 />
               </div>
 
@@ -600,11 +623,18 @@ export function Products() {
                   type="text"
                   required
                   value={formData.hsn_code}
-                  onChange={(e) => setFormData({ ...formData, hsn_code: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => { setFormData({ ...formData, hsn_code: e.target.value }); setDuplicateError(null); }}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${duplicateError ? 'border-red-500' : ''}`}
                 />
               </div>
             </div>
+
+            {duplicateError && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                <span className="font-semibold shrink-0">Already exists:</span>
+                <span>{duplicateError}</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-4">
               <div>

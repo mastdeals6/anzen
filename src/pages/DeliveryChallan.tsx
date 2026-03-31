@@ -118,6 +118,7 @@ export function DeliveryChallan() {
     notes: '',
   });
   const [salesOrders, setSalesOrders] = useState<any[]>([]);
+  const [soReservations, setSoReservations] = useState<Map<string, number>>(new Map());
   const [items, setItems] = useState<Omit<ChallanItem, 'id'>[]>([{
     product_id: '',
     batch_id: '',
@@ -337,7 +338,7 @@ export function DeliveryChallan() {
 
   const getFIFOBatch = (productId: string) => {
     const productBatches = batches
-      .filter(b => b.product_id === productId && !isExpired(b.expiry_date))
+      .filter(b => b.product_id === productId && !isExpired(b.expiry_date) && getAvailableStock(b) > 0)
       .sort((a, b) => {
         const dateA = new Date(a.import_date!).getTime();
         const dateB = new Date(b.import_date!).getTime();
@@ -359,6 +360,11 @@ export function DeliveryChallan() {
     }
   };
 
+  const getAvailableStock = (batch: Batch) => {
+    const soReservedForThisBatch = soReservations.get(batch.id) || 0;
+    return (batch.current_stock - (batch.reserved_stock || 0)) + soReservedForThisBatch;
+  };
+
   const handleSalesOrderChange = async (soId: string) => {
     setFormData({ ...formData, sales_order_id: soId });
 
@@ -368,21 +374,37 @@ export function DeliveryChallan() {
         setFormData(prev => ({ ...prev, customer_id: so.customer_id }));
 
         try {
-          const { data: soItems, error } = await supabase
-            .from('sales_order_items')
-            .select(`
-              id,
-              product_id,
-              quantity,
-              products(product_name)
-            `)
-            .eq('sales_order_id', soId);
+          const [soItemsResult, reservationsResult] = await Promise.all([
+            supabase
+              .from('sales_order_items')
+              .select(`id, product_id, quantity, products(product_name)`)
+              .eq('sales_order_id', soId),
+            supabase
+              .from('stock_reservations')
+              .select('batch_id, reserved_quantity')
+              .eq('sales_order_id', soId)
+              .eq('status', 'active')
+          ]);
 
-          if (error) throw error;
+          if (soItemsResult.error) throw soItemsResult.error;
 
+          const resMap = new Map<string, number>();
+          (reservationsResult.data || []).forEach((r: any) => {
+            const current = resMap.get(r.batch_id) || 0;
+            resMap.set(r.batch_id, current + parseFloat(r.reserved_quantity));
+          });
+          setSoReservations(resMap);
+
+          const soItems = soItemsResult.data;
           if (soItems && soItems.length > 0) {
             const newItems = soItems.map(item => {
-              const productBatches = batches.filter(b => b.product_id === item.product_id && (b.current_stock - (b.reserved_stock || 0)) > 0);
+              const productBatches = batches
+                .filter(b => {
+                  const soReservedForBatch = resMap.get(b.id) || 0;
+                  const available = (b.current_stock - (b.reserved_stock || 0)) + soReservedForBatch;
+                  return b.product_id === item.product_id && available > 0;
+                })
+                .sort((a, b) => new Date(a.import_date!).getTime() - new Date(b.import_date!).getTime());
               const fifoBatch = productBatches.length > 0 ? productBatches[0] : null;
 
               if (!fifoBatch) {
@@ -426,6 +448,7 @@ export function DeliveryChallan() {
         }
       }
     } else {
+      setSoReservations(new Map());
       setItems([{
         product_id: '',
         batch_id: '',
@@ -453,8 +476,7 @@ export function DeliveryChallan() {
           packType = match[2].toLowerCase();
           packSize = parseFloat(match[3]);
 
-          // SMART DEFAULTS: Calculate number of packs based on AVAILABLE stock
-          const availableStock = batch.current_stock - (batch.reserved_stock || 0);
+          const availableStock = getAvailableStock(batch);
 
           if (packSize && packSize > 0) {
             // Calculate how many full packs can fit in available stock
@@ -579,7 +601,7 @@ export function DeliveryChallan() {
     for (const [batchId, totalQuantity] of batchUsage.entries()) {
       const batch = batches.find(b => b.id === batchId);
       if (batch) {
-        let availableStock = batch.current_stock - (batch.reserved_stock || 0);
+        let availableStock = getAvailableStock(batch);
 
         if (editingChallan) {
           const originalQtyInThisBatch = originalItems
@@ -1222,7 +1244,7 @@ export function DeliveryChallan() {
                   });
 
                   const availableBatches = batches.filter(b => {
-                    const baseAvailable = b.current_stock - (b.reserved_stock || 0);
+                    const baseAvailable = getAvailableStock(b);
                     const usedInOtherItems = batchUsageInForm.get(b.id) || 0;
                     return b.product_id === item.product_id && (baseAvailable - usedInOtherItems) > 0;
                   });
@@ -1276,7 +1298,7 @@ export function DeliveryChallan() {
                               onChange={(value) => handleBatchChange(index, value)}
                               options={availableBatches.map((b, idx) => {
                                 const fifoIndicator = idx === 0 ? ' 🔄' : '';
-                                const baseAvailable = b.current_stock - (b.reserved_stock || 0);
+                                const baseAvailable = getAvailableStock(b);
                                 const usedInOtherItems = batchUsageInForm.get(b.id) || 0;
                                 const actualAvailable = baseAvailable - usedInOtherItems;
                                 return {
@@ -1320,7 +1342,7 @@ export function DeliveryChallan() {
                                 <td className="px-1 py-0.5 text-right border-r border-gray-300">{selectedBatch.current_stock}kg</td>
                                 <td className="px-1 py-0.5 text-right font-bold text-green-600">
                                   {(() => {
-                                    const baseAvailable = selectedBatch.current_stock - (selectedBatch.reserved_stock || 0);
+                                    const baseAvailable = getAvailableStock(selectedBatch);
                                     const usedInOtherItems = batchUsageInForm.get(selectedBatch.id) || 0;
                                     return baseAvailable - usedInOtherItems;
                                   })()}kg

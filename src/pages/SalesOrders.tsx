@@ -83,6 +83,8 @@ export default function SalesOrders() {
   const [orderToReject, setOrderToReject] = useState<string | null>(null);
   const [showPOModal, setShowPOModal] = useState(false);
   const [selectedPOUrl, setSelectedPOUrl] = useState<string | null>(null);
+  const [poBlobUrl, setPoBlobUrl] = useState<string | null>(null);
+  const [poLoading, setPoLoading] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [archiveReason, setArchiveReason] = useState('');
   const [orderToArchive, setOrderToArchive] = useState<string | null>(null);
@@ -393,8 +395,15 @@ export default function SalesOrders() {
       }
 
       fetchSalesOrders();
-    } catch (error: any) {
-      console.error('Error approving order:', error.message);
+
+      // Fire email notification (non-blocking — don't fail if it errors)
+      supabase.functions.invoke('send-app-notifications', {
+        body: { type: 'so_approved', data: { so_id: orderId } }
+      }).catch(() => {});
+
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error approving order:', msg);
       showToast({ type: 'error', title: 'Error', message: 'Failed to approve order' });
     }
   };
@@ -433,9 +442,21 @@ export default function SalesOrders() {
     }
   };
 
-  const handleViewPO = (poUrl: string) => {
+  const handleViewPO = async (poUrl: string) => {
     setSelectedPOUrl(poUrl);
     setShowPOModal(true);
+    setPoLoading(true);
+    setPoBlobUrl(null);
+    try {
+      const res = await fetch(poUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      setPoBlobUrl(blobUrl);
+    } catch {
+      setPoBlobUrl(null);
+    } finally {
+      setPoLoading(false);
+    }
   };
 
   const stats = {
@@ -843,26 +864,56 @@ export default function SalesOrders() {
           onClose={() => {
             setShowPOModal(false);
             setSelectedPOUrl(null);
+            if (poBlobUrl) { URL.revokeObjectURL(poBlobUrl); setPoBlobUrl(null); }
           }}
           title="Customer Purchase Order"
+          size="xl"
         >
-          <div className="space-y-3">
-            <a
-              href={selectedPOUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200 hover:bg-blue-50 hover:border-blue-300 transition"
-            >
-              <FileText className="w-6 h-6 text-blue-600 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900">Customer Purchase Order</p>
-                <p className="text-xs text-gray-500 mt-1">Click to open in new tab</p>
-              </div>
-              <ExternalLink className="w-5 h-5 text-gray-400 flex-shrink-0" />
-            </a>
-            <div className="text-xs text-gray-500 text-center pt-2">
-              Document opens in a new browser tab
+          <div className="flex flex-col gap-2" style={{ height: '75vh' }}>
+            <div className="flex justify-end">
+              <a
+                href={selectedPOUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Open in new tab
+              </a>
             </div>
+            {poLoading && (
+              <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg border border-gray-200">
+                <div className="text-center text-gray-500">
+                  <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                  <p className="text-sm">Loading document...</p>
+                </div>
+              </div>
+            )}
+            {!poLoading && poBlobUrl && (
+              <iframe
+                src={poBlobUrl}
+                className="flex-1 w-full rounded-lg border border-gray-200"
+                title="Customer Purchase Order"
+              />
+            )}
+            {!poLoading && !poBlobUrl && (
+              <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg border border-gray-200">
+                <div className="text-center text-gray-500 px-6">
+                  <FileText className="w-10 h-10 mx-auto mb-3 text-gray-400" />
+                  <p className="text-sm font-medium mb-1">Preview not available</p>
+                  <p className="text-xs text-gray-400 mb-4">The document cannot be displayed inline</p>
+                  <a
+                    href={selectedPOUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open document
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
         </Modal>
       )}

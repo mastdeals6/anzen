@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
+import { useEffect, useState, useMemo, lazy, Suspense, Component, ReactNode } from 'react';
 import { Layout } from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -46,7 +46,7 @@ interface MenuGroup {
   collapsible?: boolean;
 }
 
-const getFinanceMenu = (t: any): MenuGroup[] => [
+const getFinanceMenu = (t: Record<string, Record<string, string>>): MenuGroup[] => [
   {
     label: t.finance.vouchers,
     items: [
@@ -94,14 +94,58 @@ const getFinanceMenu = (t: any): MenuGroup[] => [
   }
 ];
 
+class ModuleErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
+            <p className="text-red-800 font-semibold mb-2">Failed to load this section</p>
+            <p className="text-red-600 text-sm mb-4">Please refresh the page to try again.</p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function FinanceContent() {
   const { profile } = useAuth();
   const { t } = useLanguage();
   const { dateRange } = useFinance();
-  const [activeTab, setActiveTab] = useState<FinanceTab>('purchase');
+  const [activeTab, setActiveTab] = useState<FinanceTab>(() => {
+    try { return (localStorage.getItem('finance_active_tab') as FinanceTab) || 'purchase'; } catch { return 'purchase'; }
+  });
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(isMobile);
+  const [editJournalEntryId, setEditJournalEntryId] = useState<string | null>(null);
+  const [payInvoice, setPayInvoice] = useState<{ id: string; invoice_number: string; supplier_id: string; balance_amount: number } | null>(null);
   const canManage = profile?.role === 'admin' || profile?.role === 'accounts';
+
+  const handlePayInvoice = (invoice: { id: string; invoice_number: string; supplier_id: string; balance_amount: number }) => {
+    setPayInvoice(invoice);
+    setActiveTab('payment');
+  };
+
+  const handleEditJournalEntry = (entryId: string) => {
+    setEditJournalEntryId(entryId);
+    setActiveTab('journal');
+  };
 
   const financeMenu = useMemo(() => {
     if (!t || !t.finance) return [];
@@ -169,13 +213,18 @@ function FinanceContent() {
   const renderContent = () => {
     switch (activeTab) {
       case 'purchase':
-        return <PurchaseInvoiceManager canManage={canManage} />;
+        return <PurchaseInvoiceManager canManage={canManage} onPayInvoice={handlePayInvoice} />;
       case 'receipt':
         return <ReceiptVoucherManager canManage={canManage} />;
       case 'payment':
-        return <PaymentVoucherManager canManage={canManage} />;
+        return <PaymentVoucherManager canManage={canManage} prefillInvoice={payInvoice} onPrefillConsumed={() => setPayInvoice(null)} />;
       case 'journal':
-        return <GeneralJournalEntry canManage={canManage} onNavigateToLedger={() => setActiveTab('ledger')} />;
+        return <GeneralJournalEntry
+          canManage={canManage}
+          onNavigateToLedger={() => setActiveTab('ledger')}
+          initialEditEntryId={editJournalEntryId}
+          onEditComplete={() => setEditJournalEntryId(null)}
+        />;
       case 'contra':
         return <FundTransferManager canManage={canManage} />;
       case 'expenses':
@@ -185,7 +234,7 @@ function FinanceContent() {
       case 'ledger':
         return <AccountLedger />;
       case 'journal_register':
-        return <JournalEntryViewer canManage={canManage} />;
+        return <JournalEntryViewer canManage={canManage} onEditEntry={handleEditJournalEntry} />;
       case 'bank_ledger':
         return <BankLedger />;
       case 'party_ledger':
@@ -258,7 +307,11 @@ function FinanceContent() {
                         {group.items.map((item) => (
                           <button
                             key={item.id}
-                            onClick={() => setActiveTab(item.id)}
+                            onClick={() => {
+                              setActiveTab(item.id);
+                              try { localStorage.setItem('finance_active_tab', item.id); } catch {}
+                              if (window.innerWidth < 768) setSidebarCollapsed(true);
+                            }}
                             className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
                               activeTab === item.id
                                 ? 'bg-blue-50 text-blue-700 font-medium border-l-2 border-blue-600'
@@ -287,13 +340,18 @@ function FinanceContent() {
           <div className="bg-white border-b border-gray-200 px-3 md:px-6 py-3 flex items-center gap-3">
             <button
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="p-1.5 hover:bg-gray-100 rounded transition-colors md:hidden"
+              className="p-1.5 hover:bg-gray-100 rounded transition-colors"
               title={sidebarCollapsed ? 'Show Menu' : 'Hide Menu'}
             >
               {sidebarCollapsed ? <Menu className="w-5 h-5 text-gray-600" /> : <X className="w-5 h-5 text-gray-600" />}
             </button>
-            <h1 className="text-lg font-semibold text-gray-900">{t.finance.title}</h1>
-            <span className="text-xs text-gray-400 ml-2">
+            <h1 className="text-base md:text-lg font-semibold text-gray-900 truncate">
+              <span className="hidden md:inline">{t.finance.title}</span>
+              <span className="md:hidden">
+                {financeMenu.flatMap(g => g.items).find(i => i.id === activeTab)?.label ?? t.finance.title}
+              </span>
+            </h1>
+            <span className="text-xs text-gray-400 ml-2 hidden md:inline">
               {dateRange.startDate} to {dateRange.endDate}
             </span>
           </div>
@@ -301,13 +359,15 @@ function FinanceContent() {
           {/* Content Area - Pure White Background */}
           <div className="flex-1 overflow-auto bg-white">
             <div className="p-3 md:p-6">
-              <Suspense fallback={
-                <div className="flex items-center justify-center py-12">
-                  <Loader className="w-6 h-6 animate-spin text-blue-600" />
-                </div>
-              }>
-                {renderContent()}
-              </Suspense>
+              <ModuleErrorBoundary>
+                <Suspense fallback={
+                  <div className="flex items-center justify-center py-12">
+                    <Loader className="w-6 h-6 animate-spin text-blue-600" />
+                  </div>
+                }>
+                  {renderContent()}
+                </Suspense>
+              </ModuleErrorBoundary>
             </div>
           </div>
         </div>

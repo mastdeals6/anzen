@@ -4,7 +4,8 @@ import { Modal } from '../components/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { supabase } from '../lib/supabase';
-import { Plus, Mail, Calendar as CalendarIcon, LayoutGrid, Users, Table, Inbox, Activity, Clock, Archive } from 'lucide-react';
+import { Plus, Mail, Calendar as CalendarIcon, LayoutGrid, Users, Table, Inbox, Activity, Clock, Archive, BarChart3 } from 'lucide-react';
+import { SalesTeam } from './SalesTeam';
 import { GmailBrowserInbox } from '../components/crm/GmailBrowserInbox';
 import { InquiryTableExcel } from '../components/crm/InquiryTableExcel';
 import { ReminderCalendar } from '../components/crm/ReminderCalendar';
@@ -80,7 +81,7 @@ export function CRM() {
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'table' | 'pipeline' | 'calendar' | 'email' | 'customers' | 'activities' | 'appointments' | 'archive'>('table');
+  const [activeTab, setActiveTab] = useState<'table' | 'pipeline' | 'calendar' | 'email' | 'customers' | 'activities' | 'appointments' | 'archive' | 'sales-team'>('table');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingInquiry, setEditingInquiry] = useState<Inquiry | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -494,7 +495,7 @@ export function CRM() {
                 }`}
               >
                 <CalendarIcon className="w-5 h-5" />
-                Calendar
+                {t('crm.calendar')}
               </button>
               <button
                 onClick={() => setActiveTab('customers')}
@@ -505,7 +506,7 @@ export function CRM() {
                 }`}
               >
                 <Users className="w-5 h-5" />
-                Customers
+                {t('crm.customers')}
               </button>
               <button
                 onClick={() => setActiveTab('activities')}
@@ -516,7 +517,7 @@ export function CRM() {
                 }`}
               >
                 <Activity className="w-5 h-5" />
-                Activities
+                {t('crm.activities')}
               </button>
               <button
                 onClick={() => setActiveTab('appointments')}
@@ -527,7 +528,7 @@ export function CRM() {
                 }`}
               >
                 <Clock className="w-5 h-5" />
-                Appointments
+                {t('crm.appointments')}
               </button>
               <button
                 onClick={() => setActiveTab('archive')}
@@ -538,7 +539,18 @@ export function CRM() {
                 }`}
               >
                 <Archive className="w-5 h-5" />
-                Archive
+                {t('crm.archive')}
+              </button>
+              <button
+                onClick={() => setActiveTab('sales-team')}
+                className={`flex items-center gap-2 px-6 py-4 border-b-2 transition whitespace-nowrap ${
+                  activeTab === 'sales-team'
+                    ? 'border-blue-500 text-blue-600 font-medium'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <BarChart3 className="w-5 h-5" />
+                {t('crm.salesTeam')}
               </button>
             </div>
           </div>
@@ -551,7 +563,7 @@ export function CRM() {
                   onClick={loadInquiries}
                   className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
                 >
-                  Retry
+                  {t('crm.retry')}
                 </button>
               </div>
             )}
@@ -598,6 +610,10 @@ export function CRM() {
             {activeTab === 'archive' && (
               <ArchiveView canManage={canManage} onRefresh={loadInquiries} />
             )}
+
+            {activeTab === 'sales-team' && (
+              <SalesTeam embedded />
+            )}
           </div>
         </div>
 
@@ -607,7 +623,7 @@ export function CRM() {
             setModalOpen(false);
             setEditingInquiry(null);
           }}
-          title={editingInquiry ? 'Edit Inquiry' : 'Add New Inquiry'}
+          title={editingInquiry ? t('crm.editInquiry') : t('crm.addNewInquiry')}
         >
           <CompactInquiryForm
             onSubmit={handleFormSubmit}
@@ -626,7 +642,7 @@ export function CRM() {
             setEmailModalOpen(false);
             setSelectedInquiryForEmail(null);
           }}
-          title="Send Email"
+          title={t('crm.sendEmail')}
         >
           <EmailComposer
             inquiry={selectedInquiryForEmail}

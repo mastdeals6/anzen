@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ElementType } from 'react';
 import { Layout, getRandomFallbackQuote, Quote } from '../components/Layout';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -164,7 +164,15 @@ export function Dashboard() {
   const isWarehouse = role === 'warehouse';
   const isAuditor = role === 'auditor_ca';
 
-  const statCards: any[] = [];
+  interface StatCard {
+    title: string;
+    value: number;
+    subtitle?: string;
+    icon: ElementType;
+    color: string;
+    link?: string;
+  }
+  const statCards: StatCard[] = [];
 
   if (isAdmin || isAccounts || isAuditor) {
     statCards.push({
@@ -239,7 +247,7 @@ export function Dashboard() {
     yellow: { bg: 'bg-yellow-50', text: 'text-yellow-600', icon: 'bg-yellow-100' },
   };
 
-  const quickLinks: { label: string; page: string; icon: any; color: string }[] = [];
+  const quickLinks: { label: string; page: string; icon: ElementType; color: string }[] = [];
   if (isAdmin || isSales) {
     quickLinks.push({ label: 'Go to Command Center', page: 'command-center', icon: Zap, color: 'bg-blue-50 hover:bg-blue-100 text-blue-700' });
     quickLinks.push({ label: 'View All Inquiries', page: 'crm', icon: UserCircle, color: 'bg-gray-50 hover:bg-gray-100 text-gray-700' });
@@ -300,7 +308,7 @@ export function Dashboard() {
         ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 md:gap-3">
-              {statCards.map((card: any, index) => {
+              {statCards.map((card: StatCard, index) => {
                 const Icon = card.icon;
                 const colors = colorClasses[card.color];
                 const isClickable = !!card.link;

@@ -14,6 +14,7 @@ export type UserRole = 'admin' | 'accounts' | 'sales' | 'warehouse' | 'auditor_c
 export interface UserProfile {
   id: string;
   email: string;
+  username: string;
   full_name: string;
   role: UserRole;
   language: 'en' | 'id';

@@ -6,7 +6,7 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Plus, Edit, Trash2, Mail, Phone } from 'lucide-react';
+import { Plus, Edit, Trash2, Mail, Phone, MessageCircle } from 'lucide-react';
 import { showToast } from '../components/ToastNotification';
 import { showConfirm } from '../components/ConfirmDialog';
 import { indonesiaCities, paymentTermsOptions } from '../data/indonesiaCities';
@@ -155,7 +155,7 @@ export function Customers() {
       key: 'contact_person',
       label: t('customers.contactPerson'),
       sortable: true,
-      render: (value: any, customer: Customer) => (
+      render: (_value: unknown, customer: Customer) => (
         <div>
           <div>{customer.contact_person}</div>
           <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
@@ -169,6 +169,17 @@ export function Customers() {
               <span className="flex items-center gap-1">
                 <Phone className="w-3 h-3" />
                 {customer.phone}
+                <a
+                  href={`https://wa.me/${customer.phone.replace(/\D/g, '').replace(/^0/, '62')}?text=${encodeURIComponent(`Hello ${customer.company_name},`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] bg-green-50 text-green-700 rounded hover:bg-green-100 border border-green-200"
+                  title="Open WhatsApp"
+                >
+                  <MessageCircle className="w-2.5 h-2.5" />
+                  WA
+                </a>
               </span>
             )}
           </div>

@@ -44,97 +44,27 @@ export function GmailCallback() {
         return;
       }
 
-      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-      const clientSecret = import.meta.env.VITE_GOOGLE_CLIENT_SECRET;
       const redirectUri = `${window.location.origin}/auth/gmail/callback`;
 
-      console.log('OAuth config:', {
-        hasClientId: !!clientId,
-        hasClientSecret: !!clientSecret,
-        redirectUri
-      });
-
-      if (!clientId || !clientSecret) {
-        throw new Error('Google OAuth credentials not configured. Please check your .env file.');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('User session not found');
       }
 
-      console.log('Exchanging code for token...');
-
-      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      const edgeUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gmail-oauth-callback`;
+      const edgeResponse = await fetch(edgeUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
         },
-        body: new URLSearchParams({
-          code,
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code',
-        }),
+        body: JSON.stringify({ code, redirect_uri: redirectUri }),
       });
 
-      if (!tokenResponse.ok) {
-        const errorData = await tokenResponse.text();
-        console.error('Token exchange failed:', errorData);
-        throw new Error(`Token exchange failed: ${errorData}`);
+      const edgeResult = await edgeResponse.json();
+      if (!edgeResponse.ok || edgeResult.error) {
+        throw new Error(edgeResult.error || 'Failed to connect Gmail');
       }
-
-      const tokenData = await tokenResponse.json();
-      console.log('Token received, fetching profile...');
-
-      const profileResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: {
-          'Authorization': `Bearer ${tokenData.access_token}`,
-        },
-      });
-
-      if (!profileResponse.ok) {
-        const errorText = await profileResponse.text();
-        console.error('Profile fetch failed:', {
-          status: profileResponse.status,
-          statusText: profileResponse.statusText,
-          body: errorText
-        });
-        throw new Error(`Failed to fetch Gmail profile (${profileResponse.status}): ${errorText}`);
-      }
-
-      const profileData = await profileResponse.json();
-      console.log('Profile fetched:', profileData.email);
-
-      const expiresAt = new Date();
-      expiresAt.setSeconds(expiresAt.getSeconds() + tokenData.expires_in);
-
-      console.log('[GmailCallback] === SAVING TO DATABASE ===');
-      console.log('[GmailCallback] Saving for user_id:', user.id);
-      console.log('[GmailCallback] Email:', profileData.email);
-      console.log('[GmailCallback] Expires at:', expiresAt.toISOString());
-
-      const { data: insertedData, error: dbError } = await supabase
-        .from('gmail_connections')
-        .upsert({
-          user_id: user.id,
-          email_address: profileData.email,
-          access_token: tokenData.access_token,
-          refresh_token: tokenData.refresh_token,
-          access_token_expires_at: expiresAt.toISOString(),
-          is_connected: true,
-          sync_enabled: true,
-          last_sync: null,
-        }, {
-          onConflict: 'user_id,email_address'
-        })
-        .select();
-
-      console.log('[GmailCallback] Insert result:', insertedData);
-      console.log('[GmailCallback] Insert error:', dbError);
-
-      if (dbError) {
-        console.error('[GmailCallback] Database error:', dbError);
-        throw dbError;
-      }
-
-      console.log('[GmailCallback] Gmail connection saved to database successfully');
 
       setStatus('success');
       setMessage('Gmail connected successfully! You can close this window.');
