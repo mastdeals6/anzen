@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Search, ArrowUpCircle, Printer } from 'lucide-react';
+import { Search, ArrowUpCircle, Eye, Pencil, Trash2 } from 'lucide-react';
 import { Modal } from '../Modal';
 import { SearchableSelect } from '../SearchableSelect';
 import jsPDF from 'jspdf';
@@ -75,6 +75,10 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedVoucher, setSelectedVoucher] = useState<PaymentVoucher | null>(null);
   const [voucherAllocations, setVoucherAllocations] = useState<any[]>([]);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingVoucher, setEditingVoucher] = useState<PaymentVoucher | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingVoucher, setDeletingVoucher] = useState<PaymentVoucher | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [allocations, setAllocations] = useState<{ invoiceId: string; amount: number }[]>([]);
   const [companyName, setCompanyName] = useState('');
@@ -290,7 +294,74 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
     setPendingInvoices([]);
   };
 
-  // HARDENING FIX #6: Add null-safety to prevent crashes
+  const handleViewVoucher = async (voucher: PaymentVoucher) => {
+    setSelectedVoucher(voucher);
+    const { data } = await supabase
+      .from('voucher_allocations')
+      .select('*, purchase_invoices(invoice_number, invoice_date, total_amount)')
+      .eq('payment_voucher_id', voucher.id)
+      .eq('voucher_type', 'payment');
+    setVoucherAllocations(data || []);
+    setViewModalOpen(true);
+  };
+
+  const handleEditVoucher = (voucher: PaymentVoucher) => {
+    setEditingVoucher(voucher);
+    setFormData({
+      voucher_date: voucher.voucher_date,
+      supplier_id: voucher.supplier_id,
+      payment_method: voucher.payment_method,
+      bank_account_id: voucher.bank_account_id || '',
+      reference_number: voucher.reference_number || '',
+      amount: voucher.amount,
+      pph_code_id: '',
+      pph_amount: voucher.pph_amount,
+      description: voucher.description || '',
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleUpdateVoucher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVoucher) return;
+    try {
+      const { error } = await supabase
+        .from('payment_vouchers')
+        .update({
+          voucher_date: formData.voucher_date,
+          supplier_id: formData.supplier_id,
+          payment_method: formData.payment_method,
+          bank_account_id: formData.bank_account_id || null,
+          reference_number: formData.reference_number || null,
+          amount: formData.amount,
+          pph_amount: formData.pph_amount,
+          description: formData.description || null,
+        })
+        .eq('id', editingVoucher.id);
+      if (error) throw error;
+      setEditModalOpen(false);
+      setEditingVoucher(null);
+      resetForm();
+      loadVouchers();
+    } catch (error: unknown) {
+      alert('Failed to update: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
+  const handleDeleteVoucher = async () => {
+    if (!deletingVoucher) return;
+    try {
+      await supabase.from('voucher_allocations').delete().eq('payment_voucher_id', deletingVoucher.id);
+      const { error } = await supabase.from('payment_vouchers').delete().eq('id', deletingVoucher.id);
+      if (error) throw error;
+      setDeleteConfirmOpen(false);
+      setDeletingVoucher(null);
+      loadVouchers();
+    } catch (error: unknown) {
+      alert('Failed to delete: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
   const filteredVouchers = vouchers.filter(v =>
     v.voucher_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
     v.suppliers?.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -335,6 +406,7 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Gross</th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">PPh</th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Net Paid</th>
+              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -355,11 +427,40 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
                 <td className="px-4 py-3 text-right font-medium text-red-600">
                   Rp {voucher.net_amount.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      onClick={() => handleViewVoucher(voucher)}
+                      title="View"
+                      className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    {canManage && (
+                      <>
+                        <button
+                          onClick={() => handleEditVoucher(voucher)}
+                          title="Edit"
+                          className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => { setDeletingVoucher(voucher); setDeleteConfirmOpen(true); }}
+                          title="Delete"
+                          className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
             {filteredVouchers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                   No payment vouchers found
                 </td>
               </tr>
@@ -549,6 +650,123 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* View Modal */}
+      <Modal isOpen={viewModalOpen} onClose={() => setViewModalOpen(false)} title={`Payment Voucher: ${selectedVoucher?.voucher_number}`}>
+        {selectedVoucher && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><span className="text-gray-500">Date:</span> <span className="font-medium">{new Date(selectedVoucher.voucher_date).toLocaleDateString('id-ID')}</span></div>
+              <div><span className="text-gray-500">Supplier:</span> <span className="font-medium">{selectedVoucher.suppliers?.company_name}</span></div>
+              <div><span className="text-gray-500">Method:</span> <span className="font-medium capitalize">{selectedVoucher.payment_method.replace('_', ' ')}</span></div>
+              <div><span className="text-gray-500">Bank:</span> <span className="font-medium">{selectedVoucher.bank_accounts?.alias || selectedVoucher.bank_accounts?.account_name || '-'}</span></div>
+              {selectedVoucher.reference_number && (
+                <div className="col-span-2"><span className="text-gray-500">Reference:</span> <span className="font-medium">{selectedVoucher.reference_number}</span></div>
+              )}
+              {selectedVoucher.description && (
+                <div className="col-span-2"><span className="text-gray-500">Description:</span> <span className="font-medium">{selectedVoucher.description}</span></div>
+              )}
+            </div>
+            <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+              <div className="flex justify-between"><span className="text-gray-500">Gross Amount:</span><span>Rp {selectedVoucher.amount.toLocaleString('id-ID', { minimumFractionDigits: 2 })}</span></div>
+              <div className="flex justify-between text-orange-600"><span>PPh Withholding:</span><span>- Rp {selectedVoucher.pph_amount.toLocaleString('id-ID', { minimumFractionDigits: 2 })}</span></div>
+              <div className="flex justify-between font-bold text-red-600 border-t pt-1"><span>Net Paid:</span><span>Rp {selectedVoucher.net_amount.toLocaleString('id-ID', { minimumFractionDigits: 2 })}</span></div>
+            </div>
+            {voucherAllocations.length > 0 && (
+              <div>
+                <div className="text-sm font-medium text-gray-700 mb-2">Allocated to Invoices</div>
+                <div className="border rounded-lg divide-y text-sm">
+                  {voucherAllocations.map((alloc: any) => (
+                    <div key={alloc.id} className="flex justify-between items-center px-3 py-2">
+                      <div>
+                        <div className="font-mono font-medium">{alloc.purchase_invoices?.invoice_number}</div>
+                        <div className="text-xs text-gray-400">{alloc.purchase_invoices?.invoice_date ? new Date(alloc.purchase_invoices.invoice_date).toLocaleDateString('id-ID') : ''}</div>
+                      </div>
+                      <span className="text-red-600 font-medium">Rp {Number(alloc.allocated_amount).toLocaleString('id-ID', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal isOpen={editModalOpen} onClose={() => { setEditModalOpen(false); setEditingVoucher(null); resetForm(); }} title={`Edit: ${editingVoucher?.voucher_number}`}>
+        <form onSubmit={handleUpdateVoucher} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+              <input type="date" required value={formData.voucher_date} onChange={(e) => setFormData({ ...formData, voucher_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier *</label>
+              <SearchableSelect value={formData.supplier_id} onChange={(val) => setFormData({ ...formData, supplier_id: val })} options={suppliers.map(s => ({ value: s.id, label: s.company_name }))} placeholder="Select supplier" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
+              <select value={formData.payment_method} onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="check">Check</option>
+                <option value="giro">Giro</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Gross Amount (Rp) *</label>
+              <input type="number" required value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+            </div>
+          </div>
+          {formData.payment_method !== 'cash' && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bank Account</label>
+                <select value={formData.bank_account_id} onChange={(e) => setFormData({ ...formData, bank_account_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <option value="">Select account</option>
+                  {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.alias || `${b.bank_name} - ${b.account_name}`}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reference No.</label>
+                <input type="text" value={formData.reference_number} onChange={(e) => setFormData({ ...formData, reference_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">PPh Amount</label>
+              <input type="number" value={formData.pph_amount} onChange={(e) => setFormData({ ...formData, pph_amount: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-orange-50" />
+            </div>
+            <div className="flex items-end pb-2">
+              <div className="text-sm"><span className="text-gray-500">Net:</span> <span className="font-bold text-red-600">Rp {(formData.amount - formData.pph_amount).toLocaleString('id-ID', { minimumFractionDigits: 2 })}</span></div>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" rows={2} />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={() => { setEditModalOpen(false); setEditingVoucher(null); resetForm(); }} className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="submit" className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Save Changes</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Confirm Modal */}
+      <Modal isOpen={deleteConfirmOpen} onClose={() => { setDeleteConfirmOpen(false); setDeletingVoucher(null); }} title="Delete Payment Voucher">
+        <div className="space-y-4">
+          <p className="text-gray-700">Are you sure you want to delete <span className="font-bold">{deletingVoucher?.voucher_number}</span>?</p>
+          <p className="text-sm text-red-600">This will also remove all invoice allocations linked to this payment.</p>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => { setDeleteConfirmOpen(false); setDeletingVoucher(null); }} className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={handleDeleteVoucher} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

@@ -104,6 +104,9 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
   const [linkExistingReceipt, setLinkExistingReceipt] = useState(false);
   const [linkJournalEntry, setLinkJournalEntry] = useState(false);
   const [availableJournals, setAvailableJournals] = useState<any[]>([]);
+  const [linkToSupplierPayment, setLinkToSupplierPayment] = useState(false);
+  const [supplierPayments, setSupplierPayments] = useState<any[]>([]);
+  const [loadingSupplierPayments, setLoadingSupplierPayments] = useState(false);
   const [showImportResultModal, setShowImportResultModal] = useState(false);
   const [importResult, setImportResult] = useState<{
     totalInFile: number;
@@ -1826,6 +1829,78 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     }
   };
 
+  const loadSupplierPayments = async (line: StatementLine) => {
+    setLoadingSupplierPayments(true);
+    try {
+      const amount = line.debit;
+      const lineDate = new Date(line.date);
+      const from = new Date(lineDate);
+      from.setDate(from.getDate() - 10);
+      const to = new Date(lineDate);
+      to.setDate(to.getDate() + 10);
+
+      const { data } = await supabase
+        .from('payment_vouchers')
+        .select('id, voucher_number, voucher_date, amount, net_amount, pph_amount, suppliers(company_name)')
+        .gte('voucher_date', from.toISOString().split('T')[0])
+        .lte('voucher_date', to.toISOString().split('T')[0])
+        .order('voucher_date', { ascending: false });
+
+      const filtered = (data || []).filter((pv: any) => {
+        return Math.abs(pv.net_amount - amount) < amount * 0.05 || Math.abs(pv.amount - amount) < amount * 0.05;
+      });
+
+      setSupplierPayments(filtered.length > 0 ? filtered : (data || []).slice(0, 20));
+    } catch (err) {
+      console.error('Error loading supplier payments:', err);
+      setSupplierPayments([]);
+    } finally {
+      setLoadingSupplierPayments(false);
+    }
+  };
+
+  const handleLinkSupplierPayment = async (line: StatementLine, paymentVoucherId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: pv } = await supabase
+        .from('payment_vouchers')
+        .select('journal_entry_id')
+        .eq('id', paymentVoucherId)
+        .maybeSingle();
+
+      const updateData: any = {
+        reconciliation_status: 'matched',
+        matched_at: new Date().toISOString(),
+        matched_by: user.id,
+        manually_unlinked: false,
+        notes: `Linked to supplier payment ${paymentVoucherId}`,
+      };
+
+      if (pv?.journal_entry_id) {
+        updateData.matched_entry_id = pv.journal_entry_id;
+      }
+
+      const { error } = await supabase
+        .from('bank_statement_lines')
+        .update(updateData)
+        .eq('id', line.id);
+
+      if (error) throw error;
+
+      setRecordModal(false);
+      setRecordingLine(null);
+      setLinkToSupplierPayment(false);
+      setSupplierPayments([]);
+      loadStatementLines();
+      alert('Successfully linked to supplier payment');
+    } catch (error: any) {
+      console.error('Error linking supplier payment:', error);
+      alert('Error: ' + error.message);
+    }
+  };
+
   const filteredLines = statementLines.filter(line => {
     if (activeFilter === 'all') return true;
     return line.status === activeFilter;
@@ -2333,6 +2408,8 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           setLinkToExpense(false);
           setLinkJournalEntry(false);
           setAvailableJournals([]);
+          setLinkToSupplierPayment(false);
+          setSupplierPayments([]);
         }}
         title="Record Transaction"
       >
@@ -2367,16 +2444,16 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
 
             {recordingLine.debit > 0 && (
               <div>
-                <div className="flex gap-2 mb-3">
+                <div className="grid grid-cols-2 gap-2 mb-3">
                   <button
-                    onClick={() => { setLinkToExpense(false); setLinkJournalEntry(false); }}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium ${!linkToExpense && !linkJournalEntry ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+                    onClick={() => { setLinkToExpense(false); setLinkJournalEntry(false); setLinkToSupplierPayment(false); }}
+                    className={`py-2 px-3 rounded-lg text-sm font-medium ${!linkToExpense && !linkJournalEntry && !linkToSupplierPayment ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
                   >
                     Create New Expense
                   </button>
                   <button
-                    onClick={() => { setLinkToExpense(true); setLinkJournalEntry(false); }}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium ${linkToExpense && !linkJournalEntry ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+                    onClick={() => { setLinkToExpense(true); setLinkJournalEntry(false); setLinkToSupplierPayment(false); }}
+                    className={`py-2 px-3 rounded-lg text-sm font-medium ${linkToExpense && !linkJournalEntry && !linkToSupplierPayment ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
                   >
                     Link Expense
                   </button>
@@ -2384,11 +2461,23 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                     onClick={() => {
                       setLinkJournalEntry(true);
                       setLinkToExpense(false);
+                      setLinkToSupplierPayment(false);
                       loadAvailableJournals(recordingLine);
                     }}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium ${linkJournalEntry ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+                    className={`py-2 px-3 rounded-lg text-sm font-medium ${linkJournalEntry && !linkToSupplierPayment ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
                   >
                     Link Journal
+                  </button>
+                  <button
+                    onClick={() => {
+                      setLinkToSupplierPayment(true);
+                      setLinkToExpense(false);
+                      setLinkJournalEntry(false);
+                      loadSupplierPayments(recordingLine);
+                    }}
+                    className={`py-2 px-3 rounded-lg text-sm font-medium ${linkToSupplierPayment ? 'bg-orange-600 text-white' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}
+                  >
+                    Supplier Payment
                   </button>
                 </div>
 
@@ -2420,6 +2509,37 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                         ))
                       )}
                     </div>
+                  </div>
+                ) : linkToSupplierPayment ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-gray-500">Select a supplier payment voucher to link to this bank debit (showing payments within ±10 days with similar amounts).</p>
+                    {loadingSupplierPayments ? (
+                      <div className="flex justify-center py-4"><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-600" /></div>
+                    ) : (
+                      <div className="max-h-56 overflow-y-auto border rounded-lg divide-y">
+                        {supplierPayments.length === 0 ? (
+                          <div className="p-3 text-center text-gray-500 text-sm">No matching supplier payments found</div>
+                        ) : (
+                          supplierPayments.map((pv: any) => (
+                            <button
+                              key={pv.id}
+                              onClick={() => handleLinkSupplierPayment(recordingLine, pv.id)}
+                              className="w-full p-3 text-left hover:bg-orange-50 text-sm flex justify-between items-center"
+                            >
+                              <div>
+                                <span className="font-mono font-medium text-orange-700">{pv.voucher_number}</span>
+                                <div className="text-xs text-gray-500 mt-0.5">{pv.suppliers?.company_name}</div>
+                                <div className="text-xs text-gray-400">{new Date(pv.voucher_date).toLocaleDateString('id-ID')}</div>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-medium text-red-600">Rp {Number(pv.net_amount).toLocaleString('id-ID', { minimumFractionDigits: 2 })}</div>
+                                {pv.pph_amount > 0 && <div className="text-xs text-orange-500">Gross: Rp {Number(pv.amount).toLocaleString('id-ID', { minimumFractionDigits: 0 })}</div>}
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : !linkToExpense ? (
                   <form
