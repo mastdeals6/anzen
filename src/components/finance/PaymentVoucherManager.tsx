@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Search, ArrowUpCircle, Eye, Pencil, Trash2 } from 'lucide-react';
+import { Search, ArrowUpCircle, Eye, Pencil, Trash2, Link2 } from 'lucide-react';
 import { Modal } from '../Modal';
 import { SearchableSelect } from '../SearchableSelect';
 import jsPDF from 'jspdf';
@@ -46,6 +46,7 @@ interface PaymentVoucher {
   pph_amount: number;
   net_amount: number;
   description: string | null;
+  journal_entry_id?: string | null;
   suppliers?: { company_name: string };
   bank_accounts?: { account_name: string; bank_name: string; alias: string | null };
 }
@@ -79,6 +80,10 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
   const [editingVoucher, setEditingVoucher] = useState<PaymentVoucher | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingVoucher, setDeletingVoucher] = useState<PaymentVoucher | null>(null);
+  const [linkBankModalOpen, setLinkBankModalOpen] = useState(false);
+  const [linkingVoucher, setLinkingVoucher] = useState<PaymentVoucher | null>(null);
+  const [bankLines, setBankLines] = useState<any[]>([]);
+  const [loadingBankLines, setLoadingBankLines] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [allocations, setAllocations] = useState<{ invoiceId: string; amount: number }[]>([]);
   const [companyName, setCompanyName] = useState('');
@@ -348,6 +353,74 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
     }
   };
 
+  const handleOpenLinkBank = async (voucher: PaymentVoucher) => {
+    setLinkingVoucher(voucher);
+    setLoadingBankLines(true);
+    setLinkBankModalOpen(true);
+    try {
+      const vDate = new Date(voucher.voucher_date);
+      const from = new Date(vDate);
+      from.setDate(from.getDate() - 10);
+      const to = new Date(vDate);
+      to.setDate(to.getDate() + 10);
+
+      const { data } = await supabase
+        .from('bank_statement_lines')
+        .select('id, transaction_date, description, debit_amount, credit_amount, bank_accounts(account_name, alias, bank_name), reconciliation_status')
+        .gte('transaction_date', from.toISOString().split('T')[0])
+        .lte('transaction_date', to.toISOString().split('T')[0])
+        .eq('reconciliation_status', 'unmatched')
+        .gt('debit_amount', 0)
+        .order('transaction_date', { ascending: false });
+
+      const lines = (data || []).filter((l: any) => {
+        const amt = Number(l.debit_amount);
+        return Math.abs(amt - voucher.net_amount) <= voucher.net_amount * 0.05 || Math.abs(amt - voucher.amount) <= voucher.amount * 0.05;
+      });
+
+      setBankLines(lines.length > 0 ? lines : (data || []).slice(0, 20));
+    } catch (err) {
+      console.error('Error loading bank lines:', err);
+      setBankLines([]);
+    } finally {
+      setLoadingBankLines(false);
+    }
+  };
+
+  const handleLinkToBankLine = async (bankLineId: string) => {
+    if (!linkingVoucher) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const updateData: any = {
+        reconciliation_status: 'matched',
+        matched_at: new Date().toISOString(),
+        matched_by: user.id,
+        manually_unlinked: false,
+        notes: `Linked to payment voucher ${linkingVoucher.voucher_number}`,
+      };
+
+      if (linkingVoucher.journal_entry_id) {
+        updateData.matched_entry_id = linkingVoucher.journal_entry_id;
+      }
+
+      const { error } = await supabase
+        .from('bank_statement_lines')
+        .update(updateData)
+        .eq('id', bankLineId);
+
+      if (error) throw error;
+
+      setLinkBankModalOpen(false);
+      setLinkingVoucher(null);
+      setBankLines([]);
+      alert(`Successfully linked ${linkingVoucher.voucher_number} to bank statement`);
+    } catch (error: unknown) {
+      alert('Failed to link: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
   const handleDeleteVoucher = async () => {
     if (!deletingVoucher) return;
     try {
@@ -435,6 +508,13 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
                       className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
                     >
                       <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenLinkBank(voucher)}
+                      title="Link to Bank Statement"
+                      className="p-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded"
+                    >
+                      <Link2 className="w-4 h-4" />
                     </button>
                     {canManage && (
                       <>
@@ -765,6 +845,59 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
           <div className="flex justify-end gap-3">
             <button onClick={() => { setDeleteConfirmOpen(false); setDeletingVoucher(null); }} className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50">Cancel</button>
             <button onClick={handleDeleteVoucher} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Link to Bank Statement Modal */}
+      <Modal
+        isOpen={linkBankModalOpen}
+        onClose={() => { setLinkBankModalOpen(false); setLinkingVoucher(null); setBankLines([]); }}
+        title={`Link to Bank Statement: ${linkingVoucher?.voucher_number}`}
+      >
+        <div className="space-y-4">
+          {linkingVoucher && (
+            <div className="bg-orange-50 border border-orange-100 rounded-lg p-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Supplier:</span>
+                <span className="font-medium">{linkingVoucher.suppliers?.company_name}</span>
+              </div>
+              <div className="flex justify-between mt-1">
+                <span className="text-gray-600">Date:</span>
+                <span className="font-medium">{new Date(linkingVoucher.voucher_date).toLocaleDateString('id-ID')}</span>
+              </div>
+              <div className="flex justify-between mt-1">
+                <span className="text-gray-600">Net Paid:</span>
+                <span className="font-bold text-red-600">Rp {linkingVoucher.net_amount.toLocaleString('id-ID', { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          )}
+          <p className="text-xs text-gray-500">Select a bank statement debit line (unmatched, ±10 days) to mark as reconciled against this payment.</p>
+          {loadingBankLines ? (
+            <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500" /></div>
+          ) : bankLines.length === 0 ? (
+            <div className="text-center py-6 text-gray-500 text-sm">No unmatched bank debit lines found within ±10 days of payment date.</div>
+          ) : (
+            <div className="max-h-72 overflow-y-auto border rounded-lg divide-y">
+              {bankLines.map((line: any) => (
+                <button
+                  key={line.id}
+                  onClick={() => handleLinkToBankLine(line.id)}
+                  className="w-full p-3 text-left hover:bg-orange-50 text-sm flex justify-between items-start gap-2"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-700 truncate">{line.description}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{new Date(line.transaction_date).toLocaleDateString('id-ID')} · {line.bank_accounts?.alias || line.bank_accounts?.account_name || 'Bank'}</div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="font-bold text-red-600">Rp {Number(line.debit_amount).toLocaleString('id-ID', { minimumFractionDigits: 0 })}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button onClick={() => { setLinkBankModalOpen(false); setLinkingVoucher(null); setBankLines([]); }} className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
           </div>
         </div>
       </Modal>

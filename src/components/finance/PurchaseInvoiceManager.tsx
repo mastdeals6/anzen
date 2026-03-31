@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Edit, Trash2, Search, FileText, Eye, X, AlertCircle, CreditCard } from 'lucide-react';
+import { Plus, CreditCard as Edit, Trash2, Search, FileText, Eye, X, AlertCircle, CreditCard } from 'lucide-react';
 import { showConfirm } from '../ConfirmDialog';
 import { Modal } from '../Modal';
 import { SearchableSelect } from '../SearchableSelect';
@@ -105,6 +105,7 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
     faktur_pajak_number: '',
     notes: '',
     document_urls: [] as string[],
+    round_off: 0,
   });
 
   const [lineItems, setLineItems] = useState<PurchaseInvoiceItem[]>([
@@ -289,9 +290,10 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
   const calculateTotals = () => {
     const subtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
     const taxTotal = lineItems.reduce((sum, item) => sum + item.tax_amount, 0);
-    const total = subtotal + taxTotal;
+    const roundOff = formData.round_off || 0;
+    const total = subtotal + taxTotal + roundOff;
 
-    return { subtotal, taxTotal, total };
+    return { subtotal, taxTotal, roundOff, total };
   };
 
   const handleOpenEdit = async (invoice: PurchaseInvoice) => {
@@ -306,6 +308,7 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
       faktur_pajak_number: invoice.faktur_pajak_number || '',
       notes: invoice.notes || '',
       document_urls: invoice.document_urls || [],
+      round_off: (invoice as any).round_off || 0,
     });
 
     const { data } = await supabase
@@ -427,7 +430,7 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
     try {
       const { data: userData } = await supabase.auth.getUser();
 
-      const invoiceData = {
+      const invoiceData: any = {
         invoice_number: formData.invoice_number.trim(),
         supplier_id: formData.supplier_id,
         invoice_date: formData.invoice_date,
@@ -436,6 +439,7 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
         exchange_rate: formData.exchange_rate,
         subtotal: totals.subtotal,
         tax_amount: totals.taxTotal,
+        round_off: totals.roundOff,
         total_amount: totals.total,
         faktur_pajak_number: formData.faktur_pajak_number.trim() || null,
         notes: formData.notes.trim() || null,
@@ -457,10 +461,15 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
       }));
 
       if (editingInvoice) {
-        const { error: updateError } = await supabase
+        let { error: updateError } = await supabase
           .from('purchase_invoices')
           .update(invoiceData)
           .eq('id', editingInvoice.id);
+        if (updateError && updateError.message?.includes('round_off')) {
+          const { round_off: _ro, ...invoiceDataFallback } = invoiceData;
+          const { error: fallbackError } = await supabase.from('purchase_invoices').update(invoiceDataFallback).eq('id', editingInvoice.id);
+          updateError = fallbackError;
+        }
         if (updateError) throw updateError;
 
         await supabase.from('purchase_invoice_items').delete().eq('purchase_invoice_id', editingInvoice.id);
@@ -471,11 +480,18 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
 
         showToast({ type: 'success', title: 'Updated', message: 'Purchase invoice updated successfully!' });
       } else {
-        const { data: invoice, error: invoiceError } = await supabase
+        let invoiceInsertData = { ...invoiceData, paid_amount: 0, status: 'unpaid', created_by: userData.user?.id };
+        let { data: invoice, error: invoiceError } = await supabase
           .from('purchase_invoices')
-          .insert([{ ...invoiceData, paid_amount: 0, status: 'unpaid', created_by: userData.user?.id }])
+          .insert([invoiceInsertData])
           .select()
           .single();
+        if (invoiceError && invoiceError.message?.includes('round_off')) {
+          const { round_off: _ro, ...fallbackInsert } = invoiceInsertData;
+          const res = await supabase.from('purchase_invoices').insert([fallbackInsert]).select().single();
+          invoice = res.data;
+          invoiceError = res.error;
+        }
         if (invoiceError) throw invoiceError;
 
         const { error: itemsError } = await supabase
@@ -1127,15 +1143,34 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
             <div className="mt-6 border-t pt-4 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Subtotal:</span>
-                <span className="font-medium">{formData.currency} {totals.subtotal.toLocaleString()}</span>
+                <span className="font-medium">{formData.currency} {totals.subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Tax:</span>
-                <span className="font-medium">{formData.currency} {totals.taxTotal.toLocaleString()}</span>
+                <span className="font-medium">{formData.currency} {totals.taxTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
+              <div className="flex justify-between items-center text-sm border-t pt-2">
+                <span className="text-gray-600">Round Off / Discount:</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-400">{formData.currency}</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.round_off}
+                    onChange={(e) => setFormData({ ...formData, round_off: parseFloat(e.target.value) || 0 })}
+                    className="w-28 px-2 py-1 border border-gray-300 rounded text-sm text-right focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              {formData.round_off !== 0 && (
+                <div className="text-xs text-gray-400 text-right">
+                  {formData.round_off < 0 ? 'Discount / rounding down' : 'Additional charge / rounding up'}
+                </div>
+              )}
               <div className="flex justify-between text-lg font-bold border-t pt-2">
                 <span>Total:</span>
-                <span className="text-blue-600">{formData.currency} {totals.total.toLocaleString()}</span>
+                <span className="text-blue-600">{formData.currency} {totals.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               {formData.currency === 'USD' && formData.exchange_rate > 1 && (
                 <div className="flex justify-between text-sm text-gray-500">
