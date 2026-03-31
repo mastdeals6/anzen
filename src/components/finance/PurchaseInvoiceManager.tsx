@@ -126,11 +126,34 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
   ]);
 
   useEffect(() => {
-    loadInvoices();
+    fixStaleStatuses().then(() => loadInvoices());
     loadSuppliers();
     loadProducts();
     loadAccounts();
   }, []);
+
+  const fixStaleStatuses = async () => {
+    try {
+      const { data: stale } = await supabase
+        .from('purchase_invoices')
+        .select('id, balance_amount, paid_amount, total_amount, status')
+        .eq('status', 'partial')
+        .lte('balance_amount', 0.99);
+      if (stale && stale.length > 0) {
+        for (const inv of stale) {
+          const balance = Math.round(inv.balance_amount * 100) / 100;
+          if (balance <= 0) {
+            await supabase
+              .from('purchase_invoices')
+              .update({ status: 'paid', balance_amount: 0 })
+              .eq('id', inv.id);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('fixStaleStatuses error:', e);
+    }
+  };
 
   const loadInvoices = async () => {
     try {
