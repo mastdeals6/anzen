@@ -311,31 +311,34 @@ export function CAReports() {
   };
 
   const loadInventoryMovement = async () => {
+    // Transaction types that represent REAL stock movement (not duplicates):
+    // IN:  purchase, return, adjustment (positive)
+    // OUT: sale, adjustment (negative)
+    // EXCLUDED: delivery_challan (duplicate of 'sale' when invoice is created from DC)
+    //           delivery_challan_reserved (reservation only, not physical movement)
+    const COUNTED_TYPES = ['purchase', 'sale', 'return', 'adjustment'];
+
     const { data: openingTxns } = await supabase
       .from('inventory_transactions')
-      .select(`
-        product_id,
-        quantity,
-        transaction_type
-      `)
-      .lt('transaction_date', dateRange.from);
+      .select('product_id, quantity, transaction_type')
+      .lt('transaction_date', dateRange.from)
+      .in('transaction_type', COUNTED_TYPES);
 
     const { data: periodTxns } = await supabase
       .from('inventory_transactions')
-      .select(`
-        product_id,
-        transaction_date,
-        quantity,
-        transaction_type,
-        reference_type,
-        reference_number
-      `)
+      .select('product_id, transaction_date, quantity, transaction_type, reference_type, reference_number')
       .gte('transaction_date', dateRange.from)
-      .lte('transaction_date', dateRange.to);
+      .lte('transaction_date', dateRange.to)
+      .in('transaction_type', COUNTED_TYPES);
 
     const { data: products } = await supabase
       .from('products')
       .select('id, product_code, product_name, unit');
+
+    const { data: reservations } = await supabase
+      .from('stock_reservations')
+      .select('product_id, reserved_quantity')
+      .eq('is_released', false);
 
     if (!products) return [];
 
@@ -349,6 +352,7 @@ export function CAReports() {
         opening: 0,
         in_qty: 0,
         out_qty: 0,
+        reserved_qty: 0,
         closing: 0
       });
     });
@@ -356,22 +360,25 @@ export function CAReports() {
     openingTxns?.forEach((txn: any) => {
       if (productMap.has(txn.product_id)) {
         const prod = productMap.get(txn.product_id);
-        if (txn.quantity > 0) {
-          prod.opening += parseFloat(txn.quantity);
-        } else {
-          prod.opening += parseFloat(txn.quantity);
-        }
+        prod.opening += parseFloat(txn.quantity);
       }
     });
 
     periodTxns?.forEach((txn: any) => {
       if (productMap.has(txn.product_id)) {
         const prod = productMap.get(txn.product_id);
-        if (parseFloat(txn.quantity) > 0) {
-          prod.in_qty += parseFloat(txn.quantity);
+        const qty = parseFloat(txn.quantity);
+        if (qty > 0) {
+          prod.in_qty += qty;
         } else {
-          prod.out_qty += Math.abs(parseFloat(txn.quantity));
+          prod.out_qty += Math.abs(qty);
         }
+      }
+    });
+
+    reservations?.forEach((r: any) => {
+      if (productMap.has(r.product_id)) {
+        productMap.get(r.product_id).reserved_qty += parseFloat(r.reserved_quantity || 0);
       }
     });
 
@@ -379,8 +386,9 @@ export function CAReports() {
       prod.closing = prod.opening + prod.in_qty - prod.out_qty;
     });
 
-    // Return all products (not filtered) - useful to see full inventory picture
-    return Array.from(productMap.values());
+    return Array.from(productMap.values())
+      .filter(prod => prod.opening !== 0 || prod.in_qty !== 0 || prod.out_qty !== 0 || prod.closing !== 0)
+      .sort((a, b) => (a.product_code || '').localeCompare(b.product_code || ''));
   };
 
   const loadJournalRegister = async () => {
@@ -573,7 +581,8 @@ export function CAReports() {
           'Opening Qty': row.opening,
           'Qty In': row.in_qty,
           'Qty Out': row.out_qty,
-          'Closing Qty': row.closing
+          'Closing Qty': row.closing,
+          'Reserved Qty': row.reserved_qty
         }));
         filename = `Inventory_Movement_${dateRange.from}_to_${dateRange.to}.xlsx`;
         break;
@@ -825,6 +834,7 @@ export function CAReports() {
                       <th className="px-4 py-3 text-right font-medium text-slate-700 bg-green-50">In</th>
                       <th className="px-4 py-3 text-right font-medium text-slate-700 bg-red-50">Out</th>
                       <th className="px-4 py-3 text-right font-medium text-slate-700 bg-blue-50">Closing</th>
+                      <th className="px-4 py-3 text-right font-medium text-slate-700 bg-amber-50">Reserved</th>
                     </>
                   )}
                   {selectedReport === 'coa' && (
@@ -921,15 +931,20 @@ export function CAReports() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
-                {selectedReport === 'inventory_movement' && reportData.slice(0, 100).map((row: any, idx: number) => (
-                  <tr key={idx} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-slate-900">{row.product_code}</td>
+                {selectedReport === 'inventory_movement' && reportData.slice(0, 200).map((row: any, idx: number) => (
+                  <tr key={idx} className={`hover:bg-slate-50 ${row.closing < 0 ? 'bg-red-50' : ''}`}>
+                    <td className="px-4 py-3 text-slate-900 font-mono text-xs">{row.product_code}</td>
                     <td className="px-4 py-3 text-slate-900">{row.product_name}</td>
                     <td className="px-4 py-3 text-slate-600">{row.unit}</td>
-                    <td className="px-4 py-3 text-right text-slate-900">{row.opening}</td>
-                    <td className="px-4 py-3 text-right text-green-600 bg-green-50">{row.in_qty}</td>
-                    <td className="px-4 py-3 text-right text-red-600 bg-red-50">{row.out_qty}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-blue-600 bg-blue-50">{row.closing}</td>
+                    <td className="px-4 py-3 text-right text-slate-900">{row.opening % 1 === 0 ? row.opening : parseFloat(row.opening).toFixed(3)}</td>
+                    <td className="px-4 py-3 text-right text-green-700 font-medium bg-green-50">{row.in_qty % 1 === 0 ? row.in_qty : parseFloat(row.in_qty).toFixed(3)}</td>
+                    <td className="px-4 py-3 text-right text-red-600 font-medium bg-red-50">{row.out_qty % 1 === 0 ? row.out_qty : parseFloat(row.out_qty).toFixed(3)}</td>
+                    <td className={`px-4 py-3 text-right font-semibold bg-blue-50 ${row.closing < 0 ? 'text-red-700' : 'text-blue-700'}`}>
+                      {row.closing % 1 === 0 ? row.closing : parseFloat(row.closing).toFixed(3)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-amber-700 bg-amber-50">
+                      {row.reserved_qty > 0 ? (row.reserved_qty % 1 === 0 ? row.reserved_qty : parseFloat(row.reserved_qty).toFixed(3)) : '-'}
+                    </td>
                   </tr>
                 ))}
                 {selectedReport === 'coa' && reportData.map((row: any, idx: number) => (

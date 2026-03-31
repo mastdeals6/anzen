@@ -36,7 +36,7 @@ export default function OutstandingSummary() {
 
       if (error) throw error;
 
-      setOutstandingParties((data || []).map((row: any) => ({
+      setOutstandingParties((data || []).map((row: Record<string, unknown>) => ({
         id: row.id,
         name: row.name,
         email: row.email,

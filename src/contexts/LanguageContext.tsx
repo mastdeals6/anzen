@@ -3,10 +3,14 @@ import { translations } from '../i18n/translations';
 
 type Language = 'en' | 'id';
 
+type TranslationShape = typeof translations['en'];
+type TranslateFunction = (key: string, fallback?: string) => string;
+export type TFunction = TranslateFunction & TranslationShape;
+
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: any;
+  t: TFunction;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -28,7 +32,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const translateFunction = (key: string): string => {
     const keys = key.split('.');
-    let value: any = translations[language];
+    let value: unknown = translations[language];
 
     for (const k of keys) {
       if (value && typeof value === 'object' && k in value) {

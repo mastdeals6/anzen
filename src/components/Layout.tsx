@@ -1,36 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useNavigation } from '../contexts/NavigationContext';
 import { useFinance } from '../contexts/FinanceContext';
 import { NotificationDropdown } from './NotificationDropdown';
 import { formatDate } from '../utils/dateFormat';
-import {
-  LayoutDashboard,
-  Package,
-  Boxes,
-  Warehouse,
-  Users,
-  UserCircle,
-  ShoppingCart,
-  DollarSign,
-  Settings,
-  LogOut,
-  Menu,
-  X,
-  Globe,
-  Truck,
-  Zap,
-  CheckSquare,
-  FileText,
-  ClipboardCheck,
-  TrendingUp,
-  RotateCcw,
-  AlertTriangle,
-  ClipboardList,
-  Sparkles,
-  Calendar,
-} from 'lucide-react';
+import { LayoutDashboard, Package, Boxes, Warehouse, Users, CircleUser as UserCircle, ShoppingCart, DollarSign, Settings, LogOut, Menu, X, Globe, Truck, Zap, CheckSquare, FileText, TrendingUp, ClipboardList, Calendar, Calculator } from 'lucide-react';
 import logo from '../assets/Untitled-1.svg';
 
 export interface Quote {
@@ -82,10 +57,24 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { profile, signOut } = useAuth();
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const datePickerRef = useRef<HTMLDivElement>(null);
+  const { profile, accessibleModules, signOut } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const { currentPage, setCurrentPage, sidebarCollapsed, setSidebarCollapsed } = useNavigation();
   const { dateRange, setDateRange } = useFinance();
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (datePickerRef.current && !datePickerRef.current.contains(e.target as Node)) {
+        setDatePickerOpen(false);
+      }
+    };
+    if (datePickerOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [datePickerOpen]);
 
   // Auto-collapse sidebar for specific pages
   const autoCollapsiblePages = ['crm', 'command-center', 'finance'];
@@ -99,28 +88,27 @@ export function Layout({ children }: LayoutProps) {
   }, [currentPage, shouldAutoCollapse, sidebarCollapsed, setSidebarCollapsed]);
 
   const menuItems = [
-    { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard, roles: ['admin', 'accounts', 'sales', 'warehouse', 'auditor_ca'] },
-    { id: 'products', label: t('nav.products'), icon: Package, roles: ['admin', 'sales', 'warehouse'] },
-    { id: 'batches', label: t('nav.batches'), icon: Boxes, roles: ['admin', 'warehouse', 'accounts'] },
-    { id: 'stock', label: t('nav.stock'), icon: Warehouse, roles: ['admin', 'sales', 'warehouse', 'accounts'] },
-    { id: 'customers', label: t('nav.customers'), icon: Users, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
-    { id: 'sales-orders', label: t('nav.salesOrders'), icon: FileText, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
-    { id: 'delivery-challan', label: t('nav.deliveryChallan'), icon: Truck, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
-    { id: 'sales', label: t('nav.sales'), icon: ShoppingCart, roles: ['admin', 'accounts', 'sales', 'warehouse', 'auditor_ca'] },
-    { id: 'purchase-orders', label: t('nav.purchaseOrders'), icon: ClipboardList, roles: ['admin', 'warehouse', 'sales', 'accounts', 'auditor_ca'] },
-    { id: 'import-requirements', label: t('nav.importRequirements'), icon: TrendingUp, roles: ['admin', 'sales'] },
-    { id: 'import-containers', label: t('nav.importContainers'), icon: Package, roles: ['admin', 'accounts'] },
-    { id: 'finance', label: t('nav.finance'), icon: DollarSign, roles: ['admin', 'accounts', 'auditor_ca'] },
-    { id: 'crm', label: t('nav.crm'), icon: UserCircle, roles: ['admin', 'sales'] },
-    { id: 'command-center', label: t('nav.commandCenter'), icon: Zap, roles: ['admin', 'sales'] },
-    { id: 'tasks', label: t('nav.tasks'), icon: CheckSquare, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
-    { id: 'inventory', label: t('nav.inventory'), icon: Warehouse, roles: ['admin', 'warehouse'] },
-    { id: 'settings', label: t('nav.settings'), icon: Settings, roles: ['admin', 'accounts', 'sales', 'warehouse'] },
+    { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
+    { id: 'products', label: t('nav.products'), icon: Package },
+    { id: 'batches', label: t('nav.batches'), icon: Boxes },
+    { id: 'stock', label: t('nav.stock'), icon: Warehouse },
+    { id: 'customers', label: t('nav.customers'), icon: Users },
+    { id: 'sales-orders', label: t('nav.salesOrders'), icon: FileText },
+    { id: 'delivery-challan', label: t('nav.deliveryChallan'), icon: Truck },
+    { id: 'sales', label: t('nav.sales'), icon: ShoppingCart },
+    { id: 'purchase-orders', label: t('nav.purchaseOrders'), icon: ClipboardList },
+    { id: 'import-requirements', label: t('nav.importRequirements'), icon: TrendingUp },
+    { id: 'import-containers', label: t('nav.importContainers'), icon: Package },
+    { id: 'finance', label: t('nav.finance'), icon: DollarSign },
+    { id: 'price-calculator', label: 'Price Calculator', icon: Calculator },
+    { id: 'crm', label: t('nav.crm'), icon: UserCircle },
+    { id: 'command-center', label: t('nav.commandCenter'), icon: Zap },
+    { id: 'tasks', label: t('nav.tasks'), icon: CheckSquare },
+    { id: 'inventory', label: t('nav.inventory'), icon: Warehouse },
+    { id: 'settings', label: t('nav.settings'), icon: Settings },
   ];
 
-  const visibleMenuItems = menuItems.filter(item =>
-    profile && item.roles.includes(profile.role)
-  );
+  const visibleMenuItems = menuItems.filter(item => accessibleModules.has(item.id));
 
   const toggleLanguage = () => {
     setLanguage(language === 'en' ? 'id' : 'en');
@@ -215,6 +203,7 @@ export function Layout({ children }: LayoutProps) {
               )}
             </div>
 
+            {/* Desktop date range */}
             <div className="flex-1 hidden md:flex items-center justify-center px-2">
               <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
                 <Calendar className="w-3.5 h-3.5 text-gray-500" />
@@ -232,6 +221,48 @@ export function Layout({ children }: LayoutProps) {
                   className="px-1.5 py-0.5 text-xs border border-gray-200 rounded bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
+            </div>
+
+            {/* Mobile date range toggle */}
+            <div className="md:hidden relative" ref={datePickerRef}>
+              <button
+                onClick={() => setDatePickerOpen(!datePickerOpen)}
+                className="p-2 rounded hover:bg-gray-100 flex items-center gap-1 text-gray-600"
+                title="Date range filter"
+              >
+                <Calendar className="w-4 h-4" />
+              </button>
+              {datePickerOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-50 w-64">
+                  <p className="text-xs font-medium text-gray-600 mb-2">Date Range Filter</p>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-gray-500">From</label>
+                      <input
+                        type="date"
+                        value={dateRange.startDate}
+                        onChange={(e) => setDateRange({ ...dateRange, startDate: e.target.value })}
+                        className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-200 rounded bg-white focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">To</label>
+                      <input
+                        type="date"
+                        value={dateRange.endDate}
+                        onChange={(e) => setDateRange({ ...dateRange, endDate: e.target.value })}
+                        className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-200 rounded bg-white focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setDatePickerOpen(false)}
+                    className="mt-2 w-full text-xs bg-blue-600 text-white py-1.5 rounded hover:bg-blue-700"
+                  >
+                    Apply
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="hidden lg:flex items-center gap-2 mr-3 text-xs text-gray-600">

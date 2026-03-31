@@ -71,6 +71,75 @@ export function AccountLedger() {
       const isDebitNormal = selectedAccount.normal_balance === 'debit' ||
         (!selectedAccount.normal_balance && (selectedAccount.account_type === 'asset' || selectedAccount.account_type === 'expense'));
 
+      // Check if this COA is linked to a bank account — if so, use bank_statement_lines (same as Bank Ledger)
+      const { data: bankAccountData } = await supabase
+        .from('bank_accounts')
+        .select('id, opening_balance, opening_balance_date')
+        .eq('coa_id', selectedAccount.id)
+        .maybeSingle();
+
+      if (bankAccountData) {
+        // === BANK ACCOUNT: mirror exactly what Bank Ledger does ===
+        const storedOpeningBalance = Number(bankAccountData.opening_balance) || 0;
+        const openingBalanceDate = bankAccountData.opening_balance_date || '2025-01-01';
+
+        let effectiveOpeningBalance = storedOpeningBalance;
+
+        // Sum all bank statement lines before the filter start date (from opening balance date onwards)
+        if (dateRange.startDate > openingBalanceDate) {
+          const { data: priorLines } = await supabase
+            .from('bank_statement_lines')
+            .select('debit_amount, credit_amount')
+            .eq('bank_account_id', bankAccountData.id)
+            .gte('transaction_date', openingBalanceDate)
+            .lt('transaction_date', dateRange.startDate);
+
+          priorLines?.forEach((line: any) => {
+            effectiveOpeningBalance += Number(line.credit_amount || 0) - Number(line.debit_amount || 0);
+          });
+        }
+
+        setOpeningBalance(effectiveOpeningBalance);
+
+        // Get bank statement lines for the date range
+        const endDatePlusOne = new Date(dateRange.endDate);
+        endDatePlusOne.setDate(endDatePlusOne.getDate() + 1);
+        const endDateStr = endDatePlusOne.toISOString().split('T')[0];
+
+        const { data: bankLines } = await supabase
+          .from('bank_statement_lines')
+          .select('id, transaction_date, description, reference, debit_amount, credit_amount')
+          .eq('bank_account_id', bankAccountData.id)
+          .gte('transaction_date', dateRange.startDate)
+          .lt('transaction_date', endDateStr)
+          .order('transaction_date');
+
+        let runningBalance = effectiveOpeningBalance;
+        const ledgerWithBalance = (bankLines || []).map((line: any) => {
+          const debit = Number(line.debit_amount || 0);
+          const credit = Number(line.credit_amount || 0);
+          runningBalance += credit - debit;
+          return {
+            id: line.id,
+            line_number: 0,
+            journal_entry_id: '',
+            entry_date: line.transaction_date,
+            entry_number: line.reference || '-',
+            source_module: 'bank',
+            reference_number: line.reference,
+            description: line.description || 'Bank Transaction',
+            debit,
+            credit,
+            balance: runningBalance,
+          };
+        });
+
+        setLedgerData(ledgerWithBalance);
+        return;
+      }
+
+      // === NON-BANK ACCOUNT: use journal_entry_lines as before ===
+
       // Get opening balance (all transactions before start date)
       const { data: openingData, error: openingError } = await supabase
         .from('journal_entry_lines')
@@ -114,7 +183,6 @@ export function AccountLedger() {
         throw error;
       }
 
-      // Sort by date and line number client-side since PostgREST doesn't support ordering by foreign table fields
       const sortedData = (data || []).sort((a: any, b: any) => {
         const dateA = new Date(a.journal_entries.entry_date).getTime();
         const dateB = new Date(b.journal_entries.entry_date).getTime();
@@ -122,7 +190,6 @@ export function AccountLedger() {
         return a.line_number - b.line_number;
       });
 
-      // Calculate running balance
       let runningBalance = opening;
       const ledgerWithBalance = sortedData.map((line: any) => {
         const entry = line.journal_entries;

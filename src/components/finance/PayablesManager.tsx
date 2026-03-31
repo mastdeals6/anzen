@@ -39,6 +39,7 @@ interface VendorPayment {
   bank_accounts?: {
     account_name: string;
     bank_name: string;
+    alias: string | null;
   } | null;
 }
 
@@ -46,6 +47,7 @@ interface BankAccount {
   id: string;
   account_name: string;
   bank_name: string;
+  alias: string | null;
 }
 
 interface PayablesManagerProps {
@@ -122,7 +124,8 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
           ),
           bank_accounts (
             account_name,
-            bank_name
+            bank_name,
+            alias
           )
         `)
         .order('payment_date', { ascending: false });
@@ -138,7 +141,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
     try {
       const { data, error } = await supabase
         .from('bank_accounts')
-        .select('id, account_name, bank_name')
+        .select('id, account_name, bank_name, alias')
         .eq('is_active', true)
         .order('account_name');
 
@@ -533,7 +536,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
       label: 'Bank Account',
       render: (payment: VendorPayment) =>
         payment.bank_accounts
-          ? `${payment.bank_accounts.account_name} - ${payment.bank_accounts.bank_name}`
+          ? (payment.bank_accounts.alias || `${payment.bank_accounts.account_name} - ${payment.bank_accounts.bank_name}`)
           : 'N/A'
     },
   ];
@@ -921,7 +924,7 @@ export function PayablesManager({ canManage }: PayablesManagerProps) {
                 <option value="">Select bank account</option>
                 {bankAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
-                    {account.account_name} - {account.bank_name}
+                    {account.alias || `${account.account_name} - ${account.bank_name}`}
                   </option>
                 ))}
               </select>

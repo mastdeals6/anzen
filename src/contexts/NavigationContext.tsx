@@ -4,8 +4,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 interface NavigationContextType {
   currentPage: string;
   setCurrentPage: (page: string) => void;
-  navigationData: any;
-  setNavigationData: (data: any) => void;
+  navigationData: Record<string, unknown> | null;
+  setNavigationData: (data: Record<string, unknown> | null) => void;
   clearNavigationData: () => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -26,7 +26,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     navigate(`/${page}`);
   }, [navigate]);
 
-  const [navigationData, setNavigationData] = useState<any>(null);
+  const [navigationData, setNavigationData] = useState<Record<string, unknown> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const clearNavigationData = useCallback(() => setNavigationData(null), []);

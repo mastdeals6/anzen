@@ -5,7 +5,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 interface Column<T> {
   key: string;
   label: string;
-  render?: (value: any, item: T) => React.ReactNode;
+  render?: (value: unknown, item: T) => React.ReactNode;
   sortable?: boolean;
 }
 
@@ -17,7 +17,7 @@ interface DataTableProps<T> {
   loading?: boolean;
 }
 
-export function DataTable<T extends Record<string, any>>({
+export function DataTable<T extends Record<string, unknown>>({
   data,
   columns,
   onRowClick,
@@ -38,10 +38,10 @@ export function DataTable<T extends Record<string, any>>({
     setSortConfig({ key, direction });
   };
 
-  const getSearchableValues = (obj: any): string[] => {
+  const getSearchableValues = (obj: Record<string, unknown>): string[] => {
     const values: string[] = [];
 
-    const extractValues = (value: any) => {
+    const extractValues = (value: unknown) => {
       if (value === null || value === undefined) {
         return;
       }

@@ -657,12 +657,11 @@ export function CompactInquiryForm({ onSubmit, onCancel, initialData, isEditing 
               className="w-full h-9 px-3 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               <option value="new">New</option>
-              <option value="contacted">Contacted</option>
-              <option value="qualified">Qualified</option>
-              <option value="proposal">Proposal</option>
-              <option value="negotiation">Negotiation</option>
+              <option value="in_progress">In Progress</option>
+              <option value="follow_up">Follow Up</option>
               <option value="won">Won</option>
               <option value="lost">Lost</option>
+              <option value="on_hold">On Hold</option>
             </select>
           </div>
         </div>

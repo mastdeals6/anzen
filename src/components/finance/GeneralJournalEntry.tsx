@@ -60,6 +60,8 @@ interface Template {
 interface GeneralJournalEntryProps {
   canManage: boolean;
   onNavigateToLedger: () => void;
+  initialEditEntryId?: string | null;
+  onEditComplete?: () => void;
 }
 
 const TEMPLATES: Template[] = [
@@ -141,7 +143,7 @@ function createEmptyLine(): JournalLine {
   };
 }
 
-export function GeneralJournalEntry({ canManage, onNavigateToLedger }: GeneralJournalEntryProps) {
+export function GeneralJournalEntry({ canManage, onNavigateToLedger, initialEditEntryId, onEditComplete }: GeneralJournalEntryProps) {
   const { dateRange, triggerRefresh, refreshTrigger } = useFinance();
   const { profile } = useAuth();
 
@@ -413,8 +415,25 @@ export function GeneralJournalEntry({ canManage, onNavigateToLedger }: GeneralJo
     }
   };
 
+  useEffect(() => {
+    if (initialEditEntryId && entries.length > 0) {
+      const entry = entries.find(e => e.id === initialEditEntryId);
+      if (entry) {
+        handleEditEntry(entry);
+        onEditComplete?.();
+      }
+    }
+  }, [initialEditEntryId, entries]);
+
   const handleDeleteEntry = async (entryId: string) => {
-    if (!confirm('Are you sure you want to delete this manual journal entry? This cannot be undone.')) return;
+    const { showConfirm } = await import('../ConfirmDialog');
+    const confirmed = await showConfirm({
+      title: 'Delete Journal Entry',
+      message: 'Are you sure you want to delete this manual journal entry? This cannot be undone.',
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     try {
       const { data: bankLinks } = await supabase
@@ -424,7 +443,7 @@ export function GeneralJournalEntry({ canManage, onNavigateToLedger }: GeneralJo
         .limit(1);
 
       if (bankLinks && bankLinks.length > 0) {
-        alert('Cannot delete: this entry is linked to a bank statement. Unlink it first from Bank Reconciliation.');
+        showToast({ type: 'error', title: 'Cannot Delete', message: 'This entry is linked to a bank statement. Unlink it first from Bank Reconciliation.' });
         return;
       }
 
@@ -444,7 +463,7 @@ export function GeneralJournalEntry({ canManage, onNavigateToLedger }: GeneralJo
       showToast({ type: 'success', title: 'Journal Deleted', message: 'Journal entry deleted successfully' });
       loadEntries();
     } catch (error: any) {
-      alert('Error deleting: ' + error.message);
+      showToast({ type: 'error', title: 'Delete Failed', message: error.message });
     }
   };
 

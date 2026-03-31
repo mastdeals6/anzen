@@ -31,6 +31,9 @@ const ImportContainers = lazy(() => import('./pages/ImportContainers'));
 const MaterialReturns = lazy(() => import('./pages/MaterialReturns'));
 const CreditNotes = lazy(() => import('./pages/CreditNotes').then(m => ({ default: m.CreditNotes })));
 const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders'));
+const SalesTeam = lazy(() => import('./pages/SalesTeam').then(m => ({ default: m.SalesTeam })));
+const PriceCalculator = lazy(() => import('./pages/PriceCalculator').then(m => ({ default: m.PriceCalculator })));
+const PublicCalculator = lazy(() => import('./pages/PublicCalculator').then(m => ({ default: m.PublicCalculator })));
 
 function LoadingFallback() {
   return (
@@ -61,6 +64,14 @@ function AppContent() {
 
     return cleanup;
   }, [user, profile]);
+
+  if (location.pathname === '/calculator') {
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <PublicCalculator />
+      </Suspense>
+    );
+  }
 
   if (location.pathname === '/setup') {
     return (
@@ -116,6 +127,8 @@ function AppContent() {
         return <CRM />;
       case 'command-center':
         return <CRMCommandCenter />;
+      case 'sales-team':
+        return <SalesTeam />;
       case 'tasks':
         return <Tasks />;
       case 'delivery-challan':
@@ -128,6 +141,8 @@ function AppContent() {
         return <MaterialReturns />;
       case 'finance':
         return <Finance />;
+      case 'price-calculator':
+        return <PriceCalculator />;
       case 'settings':
         return <Settings />;
       default:

@@ -15,6 +15,7 @@ interface BankAccount {
   id: string;
   account_name: string;
   bank_name: string;
+  alias: string | null;
 }
 
 interface PurchaseInvoice {
@@ -46,14 +47,23 @@ interface PaymentVoucher {
   net_amount: number;
   description: string | null;
   suppliers?: { company_name: string };
-  bank_accounts?: { account_name: string; bank_name: string };
+  bank_accounts?: { account_name: string; bank_name: string; alias: string | null };
+}
+
+interface PrefillInvoice {
+  id: string;
+  invoice_number: string;
+  supplier_id: string;
+  balance_amount: number;
 }
 
 interface PaymentVoucherManagerProps {
   canManage: boolean;
+  prefillInvoice?: PrefillInvoice | null;
+  onPrefillConsumed?: () => void;
 }
 
-export function PaymentVoucherManager({ canManage }: PaymentVoucherManagerProps) {
+export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillConsumed }: PaymentVoucherManagerProps) {
   const printRef = useRef<HTMLDivElement>(null);
   const [vouchers, setVouchers] = useState<PaymentVoucher[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -90,8 +100,25 @@ export function PaymentVoucherManager({ canManage }: PaymentVoucherManagerProps)
   }, []);
 
   useEffect(() => {
+    if (prefillInvoice && !loading) {
+      setFormData(prev => ({
+        ...prev,
+        supplier_id: prefillInvoice.supplier_id,
+        amount: prefillInvoice.balance_amount,
+      }));
+      setModalOpen(true);
+      onPrefillConsumed?.();
+    }
+  }, [prefillInvoice, loading]);
+
+  useEffect(() => {
     if (formData.supplier_id) {
-      loadPendingInvoices(formData.supplier_id);
+      const isPrefill = prefillInvoice && prefillInvoice.supplier_id === formData.supplier_id;
+      loadPendingInvoices(
+        formData.supplier_id,
+        isPrefill ? prefillInvoice.id : undefined,
+        isPrefill ? prefillInvoice.balance_amount : undefined,
+      );
     } else {
       setPendingInvoices([]);
       setAllocations([]);
@@ -112,9 +139,9 @@ export function PaymentVoucherManager({ canManage }: PaymentVoucherManagerProps)
 
   const loadVouchers = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error} = await supabase
         .from('payment_vouchers')
-        .select('*, suppliers(company_name), bank_accounts(account_name, bank_name)')
+        .select('*, suppliers(company_name), bank_accounts(account_name, bank_name, alias)')
         .order('voucher_date', { ascending: false });
 
       if (error) throw error;
@@ -132,7 +159,7 @@ export function PaymentVoucherManager({ canManage }: PaymentVoucherManagerProps)
   };
 
   const loadBankAccounts = async () => {
-    const { data } = await supabase.from('bank_accounts').select('id, account_name, bank_name').eq('is_active', true);
+    const { data } = await supabase.from('bank_accounts').select('id, account_name, bank_name, alias').eq('is_active', true);
     setBankAccounts(data || []);
   };
 
@@ -141,16 +168,20 @@ export function PaymentVoucherManager({ canManage }: PaymentVoucherManagerProps)
     setTaxCodes(data || []);
   };
 
-  const loadPendingInvoices = async (supplierId: string) => {
+  const loadPendingInvoices = async (supplierId: string, preSelectInvoiceId?: string, preSelectAmount?: number) => {
     const { data } = await supabase
       .from('purchase_invoices')
       .select('id, invoice_number, invoice_date, total_amount, paid_amount, balance_amount')
       .eq('supplier_id', supplierId)
       .gt('balance_amount', 0)
       .order('invoice_date');
-    
+
     setPendingInvoices(data || []);
-    setAllocations([]);
+    if (preSelectInvoiceId && preSelectAmount) {
+      setAllocations([{ invoiceId: preSelectInvoiceId, amount: preSelectAmount }]);
+    } else {
+      setAllocations([]);
+    }
   };
 
   const generateVoucherNumber = async () => {
@@ -237,9 +268,9 @@ export function PaymentVoucherManager({ canManage }: PaymentVoucherManagerProps)
       setModalOpen(false);
       resetForm();
       loadVouchers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error saving voucher:', error);
-      alert('Failed to save: ' + error.message);
+      alert('Failed to save: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -400,7 +431,7 @@ export function PaymentVoucherManager({ canManage }: PaymentVoucherManagerProps)
                 >
                   <option value="">Select account</option>
                   {bankAccounts.map(b => (
-                    <option key={b.id} value={b.id}>{b.bank_name} - {b.account_name}</option>
+                    <option key={b.id} value={b.id}>{b.alias || `${b.bank_name} - ${b.account_name}`}</option>
                   ))}
                 </select>
               </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Upload, RefreshCw, CheckCircle2, AlertCircle, XCircle, Plus, Calendar, Landmark, FileText, Edit } from 'lucide-react';
+import { Upload, RefreshCw, CheckCircle2, AlertCircle, XCircle, Plus, Calendar, Landmark, FileText, CreditCard as Edit } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Modal } from '../Modal';
 import { SearchableSelect } from '../SearchableSelect';
@@ -62,7 +62,9 @@ interface BankReconciliationEnhancedProps {
 
 export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnhancedProps) {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
-  const [selectedBank, setSelectedBank] = useState<string>('');
+  const [selectedBank, setSelectedBank] = useState<string>(() => {
+    try { return localStorage.getItem('bank_recon_selected_bank') || ''; } catch { return ''; }
+  });
   const [selectedAccount, setSelectedAccount] = useState<BankAccount | null>(null);
   const [statementLines, setStatementLines] = useState<StatementLine[]>([]);
   const [loading, setLoading] = useState(false);
@@ -102,6 +104,13 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
   const [linkExistingReceipt, setLinkExistingReceipt] = useState(false);
   const [linkJournalEntry, setLinkJournalEntry] = useState(false);
   const [availableJournals, setAvailableJournals] = useState<any[]>([]);
+  const [showImportResultModal, setShowImportResultModal] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    totalInFile: number;
+    importedCount: number;
+    skippedEntries: any[];
+  } | null>(null);
+  const [forceImporting, setForceImporting] = useState(false);
 
   const expenseCategories = [
     {
@@ -333,13 +342,19 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
         .order('account_name');
       if (error) throw error;
       setBankAccounts(data || []);
-      if (data && data.length > 0) {
-        const bcaAccount = data.find(
-          acc => acc.bank_name === 'BCA Bank' &&
-                 acc.account_number === '0930 2010 22' &&
-                 acc.currency === 'IDR'
-        );
-        setSelectedBank(bcaAccount?.id || data[0].id);
+      if (data && data.length > 0 && !selectedBank) {
+        const savedBank = localStorage.getItem('bank_recon_selected_bank');
+        const savedExists = savedBank && data.some(a => a.id === savedBank);
+        if (!savedExists) {
+          const bcaAccount = data.find(
+            acc => acc.bank_name === 'BCA Bank' &&
+                   acc.account_number === '0930 2010 22' &&
+                   acc.currency === 'IDR'
+          );
+          const defaultId = bcaAccount?.id || data[0].id;
+          setSelectedBank(defaultId);
+          try { localStorage.setItem('bank_recon_selected_bank', defaultId); } catch {}
+        }
       }
     } catch (err) {
       console.error('Error loading bank accounts:', err);
@@ -627,62 +642,51 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
             created_by: user?.id,
           }));
 
-          // Check for potential duplicates first
+          // Check for existing transactions using hash-equivalent matching (date + amounts + normalized description)
+          const normalizeDesc = (desc: string) =>
+            desc.toLowerCase().replace(/\s+/g, ' ').trim().substring(0, 100);
+
           const { data: existingLines } = await supabase
             .from('bank_statement_lines')
-            .select('transaction_date, description, debit_amount, credit_amount, running_balance')
+            .select('transaction_date, description, debit_amount, credit_amount')
             .eq('bank_account_id', selectedBank);
 
-          // Find duplicates by matching date, amounts, and description
-          const duplicates = insertData.filter(newLine =>
-            existingLines?.some(existing =>
-              existing.transaction_date === newLine.transaction_date &&
-              existing.description === newLine.description &&
-              existing.debit_amount === newLine.debit_amount &&
-              existing.credit_amount === newLine.credit_amount &&
-              existing.running_balance === newLine.running_balance
-            )
-          );
+          // Build keys with occurrence count to detect which exact occurrence already exists in DB
+          // e.g. if "BIF BIAYA TXN 2500" appears 3x in DB, we skip the first 3 from CSV
+          const dbKeyCounts = new Map<string, number>();
+          (existingLines || []).forEach(e => {
+            const k = `${e.transaction_date}|${Number(e.debit_amount)||0}|${Number(e.credit_amount)||0}|${normalizeDesc(e.description||'')}`;
+            dbKeyCounts.set(k, (dbKeyCounts.get(k) || 0) + 1);
+          });
 
-          let finalInsertData = insertData;
-
-          if (duplicates.length > 0) {
-            // Show duplicates to user
-            let dupMessage = `⚠️ Found ${duplicates.length} potential duplicate transaction(s):\n\n`;
-            duplicates.slice(0, 5).forEach((dup, idx) => {
-              const date = new Date(dup.transaction_date).toLocaleDateString('en-GB');
-              const amt = dup.debit_amount || dup.credit_amount;
-              dupMessage += `${idx + 1}. ${date} - ${dup.description.substring(0, 40)} - Rp ${amt.toLocaleString()}\n`;
-            });
-            if (duplicates.length > 5) {
-              dupMessage += `... and ${duplicates.length - 5} more\n`;
+          const csvKeyCounts = new Map<string, number>();
+          const skippedEntries: typeof insertData = [];
+          const finalInsertData = insertData.filter(line => {
+            const key = `${line.transaction_date}|${Number(line.debit_amount)||0}|${Number(line.credit_amount)||0}|${normalizeDesc(line.description||'')}`;
+            const csvOccurrence = csvKeyCounts.get(key) || 0;
+            csvKeyCounts.set(key, csvOccurrence + 1);
+            const dbCount = dbKeyCounts.get(key) || 0;
+            if (csvOccurrence < dbCount) {
+              skippedEntries.push(line);
+              return false;
             }
-            dupMessage += `\nDo you want to ADD them anyway?\n(Click OK to add, Cancel to skip duplicates)`;
-
-            const userWantsToAdd = confirm(dupMessage);
-
-            if (!userWantsToAdd) {
-              // Filter out duplicates
-              finalInsertData = insertData.filter(newLine =>
-                !existingLines?.some(existing =>
-                  existing.transaction_date === newLine.transaction_date &&
-                  existing.description === newLine.description &&
-                  existing.debit_amount === newLine.debit_amount &&
-                  existing.credit_amount === newLine.credit_amount &&
-                  existing.running_balance === newLine.running_balance
-                )
-              );
-            }
-          }
+            return true;
+          });
 
           if (finalInsertData.length === 0) {
-            alert('ℹ️ No new transactions to import (all were duplicates and skipped)');
+            setImportResult({
+              totalInFile: insertData.length,
+              importedCount: 0,
+              skippedEntries,
+            });
+            setShowImportResultModal(true);
             return;
           }
 
+          // Use upsert with ignoreDuplicates to safely handle any remaining hash collisions
           const { data: inserted, error: insertError } = await supabase
             .from('bank_statement_lines')
-            .insert(finalInsertData)
+            .upsert(finalInsertData, { onConflict: 'transaction_hash', ignoreDuplicates: true })
             .select();
 
           if (insertError) {
@@ -691,15 +695,13 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           }
 
           const insertedCount = inserted?.length || 0;
-          const skippedCount = insertData.length - finalInsertData.length;
 
-          let message = `✅ CSV Import complete!\n`;
-          message += `   Total processed: ${insertData.length} transaction(s)\n`;
-          message += `   New transactions added: ${insertedCount}\n`;
-          if (skippedCount > 0) {
-            message += `   Duplicates skipped: ${skippedCount}`;
-          }
-          alert(message);
+          setImportResult({
+            totalInFile: insertData.length,
+            importedCount: insertedCount,
+            skippedEntries,
+          });
+          setShowImportResultModal(true);
 
           try {
             await loadStatementLines();
@@ -1414,7 +1416,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
     try {
       await supabase
         .from('bank_statement_lines')
-        .update({ reconciliation_status: 'matched' })
+        .update({ reconciliation_status: 'matched', manually_unlinked: false })
         .eq('id', lineId);
 
       // Update in local state
@@ -1442,6 +1444,34 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       ));
     } catch (err) {
       console.error('Error rejecting match:', err);
+    }
+  };
+
+  const handleForceImport = async () => {
+    if (!importResult?.skippedEntries?.length) return;
+    setForceImporting(true);
+    try {
+      const forceData = importResult.skippedEntries.map(entry => ({
+        ...entry,
+        upload_id: crypto.randomUUID(),
+        notes: 'Force imported (duplicate override)',
+      }));
+      const { data: inserted, error } = await supabase
+        .from('bank_statement_lines')
+        .insert(forceData)
+        .select();
+      if (error) throw error;
+      setShowImportResultModal(false);
+      setImportResult(null);
+      try { await loadStatementLines(); } catch {}
+      if (inserted?.length) {
+        try { await autoMatchTransactions(); } catch {}
+      }
+      alert(`✅ Force import complete! ${inserted?.length || 0} entries added.`);
+    } catch (err: any) {
+      alert(`❌ Force import failed: ${err.message}`);
+    } finally {
+      setForceImporting(false);
     }
   };
 
@@ -1506,6 +1536,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           matched_expense_id: expenseId,
           matched_at: new Date().toISOString(),
           matched_by: user.id,
+          manually_unlinked: false,
         })
         .eq('id', line.id)
         .select()
@@ -1605,6 +1636,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
             matched_receipt_id: receipt.id,
             matched_at: new Date().toISOString(),
             matched_by: user.id,
+            manually_unlinked: false,
           })
           .eq('id', line.id);
 
@@ -1620,6 +1652,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
             notes: `${type}: ${description}`,
             matched_at: new Date().toISOString(),
             matched_by: user.id,
+            manually_unlinked: false,
           })
           .eq('id', line.id);
 
@@ -1653,6 +1686,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           matched_receipt_id: receiptId,
           matched_at: new Date().toISOString(),
           matched_by: user.id,
+          manually_unlinked: false,
         })
         .eq('id', line.id);
 
@@ -1774,6 +1808,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           matched_entry_id: journalId,
           matched_at: new Date().toISOString(),
           matched_by: user.id,
+          manually_unlinked: false,
         })
         .eq('id', line.id);
 
@@ -1909,10 +1944,12 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           matched_receipt_id: null,
           matched_fund_transfer_id: null,
           matched_entry_id: null,
+          matched_petty_cash_id: null,
           reconciliation_status: 'unmatched',
           matched_at: null,
           matched_by: null,
           notes: null,
+          manually_unlinked: true,
         })
         .eq('id', editingLine.id);
 
@@ -2013,7 +2050,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           {/* Bank Account Selector */}
           <select
             value={selectedBank}
-            onChange={(e) => setSelectedBank(e.target.value)}
+            onChange={(e) => { setSelectedBank(e.target.value); try { localStorage.setItem('bank_recon_selected_bank', e.target.value); } catch {} }}
             className="px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium"
           >
             {bankAccounts.map(bank => (
@@ -3229,6 +3266,101 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           </form>
         )}
       </Modal>
+
+      {/* Import Result Modal */}
+      {showImportResultModal && importResult && (
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setShowImportResultModal(false);
+            setImportResult(null);
+          }}
+          title="CSV Import Result"
+        >
+          <div className="space-y-4">
+            {importResult.importedCount > 0 ? (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-green-800">
+                  <p className="font-semibold">Import successful</p>
+                  <p>Total in file: {importResult.totalInFile} &nbsp;|&nbsp; New entries added: <strong>{importResult.importedCount}</strong></p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-semibold">All {importResult.totalInFile} {importResult.totalInFile === 1 ? 'entry' : 'entries'} already exist in the database</p>
+                  <p className="text-blue-600 mt-1">No new entries were imported.</p>
+                </div>
+              </div>
+            )}
+
+            {importResult.skippedEntries.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-gray-700">
+                    Skipped entries ({importResult.skippedEntries.length} — already in system)
+                  </h4>
+                </div>
+                <div className="border border-gray-200 rounded-lg divide-y max-h-48 overflow-y-auto">
+                  {importResult.skippedEntries.map((e, i) => {
+                    const d = new Date(e.transaction_date).toLocaleDateString('en-GB');
+                    const amt = e.debit_amount || e.credit_amount;
+                    const isDebit = !!e.debit_amount;
+                    return (
+                      <div key={i} className="px-3 py-2 flex items-center justify-between text-sm">
+                        <div>
+                          <span className="text-gray-500 text-xs font-mono">{d}</span>
+                          <span className="ml-2 text-gray-800">{String(e.description).substring(0, 55)}</span>
+                        </div>
+                        <span className={`ml-2 font-medium text-xs whitespace-nowrap ${isDebit ? 'text-red-600' : 'text-green-600'}`}>
+                          {isDebit ? '-' : '+'}Rp {Number(amt).toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-xs text-amber-800">
+                    <strong>These entries appear to already exist.</strong> If you believe they are new legitimate transactions
+                    (e.g. same amount to the same party on the same day), you can force import them anyway.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setShowImportResultModal(false);
+                  setImportResult(null);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
+              >
+                Close
+              </button>
+              {importResult.skippedEntries.length > 0 && (
+                <button
+                  onClick={handleForceImport}
+                  disabled={forceImporting}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 text-sm font-medium flex items-center gap-2"
+                >
+                  {forceImporting ? (
+                    <>
+                      <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
+                      Importing...
+                    </>
+                  ) : (
+                    <>Import Anyway ({importResult.skippedEntries.length})</>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

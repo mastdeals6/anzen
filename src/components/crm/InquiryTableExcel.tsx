@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import {
   ChevronDown, X, Mail, Phone, FileText, Calendar,
   Flame, ArrowUp, Minus, Send, MessageSquare, CheckSquare,
-  Download, FileSpreadsheet, ArrowUpDown, ArrowDown, Check, XCircle, Plus, ChevronRight, Layers
+  Download, FileSpreadsheet, ArrowUpDown, ArrowDown, Check, XCircle, Plus, ChevronRight, Layers, ExternalLink
 } from 'lucide-react';
 import { Modal } from '../Modal';
 import { GmailLikeComposer } from './GmailLikeComposer';
@@ -1570,7 +1570,25 @@ export function InquiryTableExcel({ inquiries, onRefresh, canManage, onAddInquir
 
                     {/* Company */}
                     <td className="px-3 py-2 border-r border-gray-200">
-                      <div className="font-medium">{inquiry.company_name}</div>
+                      <div className="font-medium text-sm">{inquiry.company_name}</div>
+                      {inquiry.contact_person && (
+                        <div className="text-xs text-gray-500 mt-0.5">{inquiry.contact_person}</div>
+                      )}
+                      {inquiry.contact_phone && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <a
+                            href={`https://wa.me/${inquiry.contact_phone.replace(/[^0-9]/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-xs text-green-600 hover:text-green-700 hover:underline"
+                            title="Open WhatsApp"
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                            {inquiry.contact_phone}
+                          </a>
+                        </div>
+                      )}
                     </td>
 
                     {/* Mail Subject */}

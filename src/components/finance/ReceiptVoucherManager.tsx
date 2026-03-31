@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Eye, Search, ArrowDownCircle, Check, Edit2, Trash2, X, Printer } from 'lucide-react';
+import { Plus, Eye, Search, ArrowDownCircle, Check, CreditCard as Edit2, Trash2, X, Printer } from 'lucide-react';
 import { Modal } from '../Modal';
 import { SearchableSelect } from '../SearchableSelect';
 import jsPDF from 'jspdf';
@@ -182,8 +182,12 @@ export function ReceiptVoucherManager({ canManage }: ReceiptVoucherManagerProps)
   const loadAllocationTargets = async (customerId: string, keepExistingAllocations = false, voucherId?: string) => {
     try {
       // Load invoices with calculated balance using RPC function
+      // When editing (voucherId provided), exclude current voucher's allocations so balance shows correctly
       const { data: allInvoicesData } = await supabase
-        .rpc('get_invoices_with_balance', { customer_uuid: customerId });
+        .rpc('get_invoices_with_balance', {
+          customer_uuid: customerId,
+          exclude_voucher_uuid: voucherId || null
+        });
 
       // Filter for unpaid/partially paid invoices
       const invoices = (allInvoicesData || []).filter(inv => inv.balance_amount > 0);
@@ -211,9 +215,12 @@ export function ReceiptVoucherManager({ canManage }: ReceiptVoucherManagerProps)
           const soIds = existingAllocs.filter(a => a.sales_order_id).map(a => a.sales_order_id);
 
           if (invoiceIds.length > 0) {
-            // Get all invoices with balance calculation, then filter for the linked ones
+            // Get all invoices with balance calculation excluding current voucher, filter for linked ones
             const { data: allInvsData } = await supabase
-              .rpc('get_invoices_with_balance', { customer_uuid: customerId });
+              .rpc('get_invoices_with_balance', {
+                customer_uuid: customerId,
+                exclude_voucher_uuid: voucherId || null
+              });
 
             additionalInvoices = (allInvsData || []).filter(inv =>
               invoiceIds.includes(inv.id)
@@ -784,7 +791,7 @@ export function ReceiptVoucherManager({ canManage }: ReceiptVoucherManagerProps)
                             <input
                               type="number"
                               min={0}
-                              max={balance}
+                              step="0.01"
                               value={allocations.find(a => a.targetId === target.id)?.amount || ''}
                               onChange={(e) => handleAllocationChange(target.id, target.type, parseFloat(e.target.value) || 0)}
                               className="w-28 px-2 py-1 border rounded text-right text-xs"
