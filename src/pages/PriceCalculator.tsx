@@ -494,17 +494,31 @@ export function PriceCalculator() {
         {activeTab === 'calculator' && (
           <div className="space-y-3">
             <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex gap-1.5">
-                  {(['fcl', 'lcl', 'air'] as const).map((m) => (
-                    <button key={m} onClick={() => setMode(m)}
-                      className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${mode === m ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                      {m.toUpperCase()}
+              <div className="flex flex-col gap-3 mb-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex gap-1.5">
+                    {(['fcl', 'lcl', 'air'] as const).map((m) => (
+                      <button key={m} onClick={() => setMode(m)}
+                        className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${mode === m ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                        {m.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="hidden sm:flex items-center gap-1 text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                    <TrendingDown className="w-3 h-3 text-orange-500" />
+                    <span>₹/$ = <strong className="text-gray-700">{inrRate}</strong></span>
+                    <button
+                      onClick={handleFetchINRRate}
+                      disabled={fetchingINR}
+                      title="Fetch live INR/USD rate"
+                      className="ml-0.5 text-gray-400 hover:text-orange-500 disabled:opacity-40 transition-colors"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${fetchingINR ? 'animate-spin text-orange-500' : ''}`} />
                     </button>
-                  ))}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                  <div className="flex sm:hidden items-center gap-1 text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded px-2 py-1.5 flex-1">
                     <TrendingDown className="w-3 h-3 text-orange-500" />
                     <span>₹/$ = <strong className="text-gray-700">{inrRate}</strong></span>
                     <button
@@ -519,7 +533,7 @@ export function PriceCalculator() {
                   <button
                     onClick={() => runCalculation(inputs, config, mode)}
                     disabled={calculating}
-                    className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-md hover:bg-blue-700 disabled:opacity-60 transition-colors shadow-sm"
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-md hover:bg-blue-700 disabled:opacity-60 transition-colors shadow-sm w-full sm:w-auto"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${calculating ? 'animate-spin' : ''}`} />
                     Calculate Price

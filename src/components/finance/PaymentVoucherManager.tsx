@@ -262,13 +262,16 @@ export function PaymentVoucherManager({ canManage, prefillInvoice, onPrefillCons
 
         const invoice = pendingInvoices.find(i => i.id === alloc.invoiceId);
         if (invoice) {
-          const newPaidAmount = (invoice.paid_amount || 0) + alloc.amount;
-          const newBalance = invoice.total_amount - newPaidAmount;
+          const newPaidAmount = Math.round(((invoice.paid_amount || 0) + alloc.amount) * 100) / 100;
+          const newBalance = Math.round((invoice.total_amount - newPaidAmount) * 100) / 100;
+          const newBalanceFromField = Math.round((invoice.balance_amount - alloc.amount) * 100) / 100;
+          const effectiveBalance = Math.min(newBalance, Math.max(0, newBalanceFromField));
           await supabase
             .from('purchase_invoices')
             .update({
               paid_amount: newPaidAmount,
-              status: newBalance <= 0 ? 'paid' : 'partial',
+              balance_amount: Math.max(0, effectiveBalance),
+              status: effectiveBalance <= 0 ? 'paid' : 'partial',
             })
             .eq('id', alloc.invoiceId);
         }

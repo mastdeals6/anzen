@@ -94,6 +94,7 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
   const [uploading, setUploading] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'invoice_date', direction: 'desc' });
 
   const [formData, setFormData] = useState({
     invoice_number: '',
@@ -461,12 +462,20 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
       }));
 
       if (editingInvoice) {
+        const newBalance = Math.round((totals.total - (editingInvoice.paid_amount || 0)) * 100) / 100;
+        const effectiveBalance = Math.max(0, newBalance);
+        const newStatus = effectiveBalance <= 0 ? 'paid' : (editingInvoice.paid_amount || 0) > 0 ? 'partial' : 'unpaid';
+        const editInvoiceData = {
+          ...invoiceData,
+          balance_amount: effectiveBalance,
+          status: newStatus,
+        };
         let { error: updateError } = await supabase
           .from('purchase_invoices')
-          .update(invoiceData)
+          .update(editInvoiceData)
           .eq('id', editingInvoice.id);
         if (updateError && updateError.message?.includes('round_off')) {
-          const { round_off: _ro, ...invoiceDataFallback } = invoiceData;
+          const { round_off: _ro, ...invoiceDataFallback } = editInvoiceData;
           const { error: fallbackError } = await supabase.from('purchase_invoices').update(invoiceDataFallback).eq('id', editingInvoice.id);
           updateError = fallbackError;
         }
@@ -565,6 +574,7 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
       faktur_pajak_number: '',
       notes: '',
       document_urls: [],
+      round_off: 0,
     });
     setLineItems([
       {
@@ -583,10 +593,37 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
     ]);
   };
 
-  const filteredInvoices = invoices.filter(inv =>
-    inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    inv.suppliers?.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const filteredInvoices = invoices
+    .filter(inv =>
+      inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      inv.suppliers?.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => {
+      const { key, direction } = sortConfig;
+      let aVal: any;
+      let bVal: any;
+      if (key === 'supplier') {
+        aVal = a.suppliers?.company_name || '';
+        bVal = b.suppliers?.company_name || '';
+      } else if (key === 'status') {
+        const order = { unpaid: 0, partial: 1, paid: 2 };
+        aVal = order[a.status as keyof typeof order] ?? 3;
+        bVal = order[b.status as keyof typeof order] ?? 3;
+      } else {
+        aVal = (a as any)[key] ?? '';
+        bVal = (b as any)[key] ?? '';
+      }
+      if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
 
   const totals = calculateTotals();
 
@@ -630,26 +667,68 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                Invoice #
+              <th
+                className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:bg-gray-100"
+                onClick={() => handleSort('invoice_number')}
+              >
+                <span className="flex items-center gap-1">
+                  Invoice #
+                  {sortConfig.key === 'invoice_number' ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                </span>
               </th>
-              <th className="hidden md:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Supplier
+              <th
+                className="hidden md:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100"
+                onClick={() => handleSort('supplier')}
+              >
+                <span className="flex items-center gap-1">
+                  Supplier
+                  {sortConfig.key === 'supplier' ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                </span>
               </th>
-              <th className="hidden lg:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Date
+              <th
+                className="hidden lg:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100"
+                onClick={() => handleSort('invoice_date')}
+              >
+                <span className="flex items-center gap-1">
+                  Date
+                  {sortConfig.key === 'invoice_date' ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                </span>
               </th>
-              <th className="hidden sm:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                Currency
+              <th
+                className="hidden sm:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:bg-gray-100"
+                onClick={() => handleSort('currency')}
+              >
+                <span className="flex items-center gap-1">
+                  Currency
+                  {sortConfig.key === 'currency' ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                </span>
               </th>
-              <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Total
+              <th
+                className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100"
+                onClick={() => handleSort('total_amount')}
+              >
+                <span className="flex items-center justify-end gap-1">
+                  Total
+                  {sortConfig.key === 'total_amount' ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                </span>
               </th>
-              <th className="hidden xl:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Balance
+              <th
+                className="hidden xl:table-cell px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100"
+                onClick={() => handleSort('balance_amount')}
+              >
+                <span className="flex items-center justify-end gap-1">
+                  Balance
+                  {sortConfig.key === 'balance_amount' ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                </span>
               </th>
-              <th className="hidden lg:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
+              <th
+                className="hidden lg:table-cell px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100"
+                onClick={() => handleSort('status')}
+              >
+                <span className="flex items-center gap-1">
+                  Status
+                  {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? ' ↑' : ' ↓') : ' ↕'}
+                </span>
               </th>
               <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider sticky right-0 bg-gray-50">
                 Actions
