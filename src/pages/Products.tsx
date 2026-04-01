@@ -276,6 +276,17 @@ export function Products() {
         return;
       }
 
+      const { data: poItems } = await supabase
+        .from('purchase_order_items')
+        .select('id')
+        .eq('product_id', product.id)
+        .limit(1);
+
+      if (poItems && poItems.length > 0) {
+        showToast({ type: 'error', title: 'Error', message: 'Cannot delete this product. It has been used in purchase orders. Please use the "Deactivate" option instead.' });
+        return;
+      }
+
       const { data: batches } = await supabase
         .from('batches')
         .select('id, batch_number')

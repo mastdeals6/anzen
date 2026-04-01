@@ -74,8 +74,8 @@ export function Stock() {
             .eq('status', 'active');
 
           const reserved_quantity = reservedData?.reduce((sum, r) => sum + Number(r.reserved_quantity), 0) || 0;
-          const shortage_quantity = shortageMap.get(product.product_id) || 0;
           const available_quantity = product.total_current_stock - reserved_quantity;
+          const shortage_quantity = available_quantity < 0 ? shortageMap.get(product.product_id) || 0 : 0;
 
           return {
             ...product,
