@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   Upload, Search, Download, Trash2, ChevronUp, ChevronDown,
-  ChevronsUpDown, Filter, X, RefreshCw, AlertCircle, FileSpreadsheet,
+  ChevronsUpDown, X, RefreshCw, AlertCircle, FileSpreadsheet,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -21,28 +21,35 @@ interface ImportRow {
   exporter: string;
   importer: string;
   type: string;
-  created_at: string;
 }
 
-type SortField = keyof Omit<ImportRow, 'id' | 'created_at'>;
+type SortField = keyof Omit<ImportRow, 'id'>;
 type SortDir = 'asc' | 'desc';
 
-const PAGE_SIZE = 50;
+const FILTERABLE: SortField[] = ['product_name', 'origin', 'destination', 'exporter', 'importer', 'type'];
 
-const COLS: { key: SortField; label: string; width: string; numeric?: boolean }[] = [
-  { key: 'date', label: 'DATE', width: 'min-w-[110px]' },
-  { key: 'hs_code', label: 'HS CODE', width: 'min-w-[100px]' },
-  { key: 'product_name', label: 'PRODUCT', width: 'min-w-[220px]' },
-  { key: 'quantity', label: 'QTY', width: 'min-w-[80px]', numeric: true },
-  { key: 'unit', label: 'UNIT', width: 'min-w-[90px]' },
-  { key: 'unit_rate', label: 'UNIT RATE', width: 'min-w-[100px]', numeric: true },
-  { key: 'currency', label: 'CURRENCY', width: 'min-w-[90px]' },
-  { key: 'total_usd', label: 'TOTAL (USD)', width: 'min-w-[120px]', numeric: true },
-  { key: 'origin', label: 'ORIGIN', width: 'min-w-[140px]' },
-  { key: 'destination', label: 'DESTINATION', width: 'min-w-[120px]' },
-  { key: 'exporter', label: 'EXPORTER', width: 'min-w-[200px]' },
-  { key: 'importer', label: 'IMPORTER', width: 'min-w-[200px]' },
-  { key: 'type', label: 'TYPE', width: 'min-w-[130px]' },
+interface ColDef {
+  key: SortField;
+  label: string;
+  defaultWidth: number;
+  numeric?: boolean;
+  filterable?: boolean;
+}
+
+const COLS: ColDef[] = [
+  { key: 'date', label: 'DATE', defaultWidth: 100 },
+  { key: 'hs_code', label: 'HS CODE', defaultWidth: 100 },
+  { key: 'product_name', label: 'PRODUCT', defaultWidth: 220, filterable: true },
+  { key: 'quantity', label: 'QTY', defaultWidth: 80, numeric: true },
+  { key: 'unit', label: 'UNIT', defaultWidth: 80 },
+  { key: 'unit_rate', label: 'UNIT RATE', defaultWidth: 95, numeric: true },
+  { key: 'currency', label: 'CURRENCY', defaultWidth: 85 },
+  { key: 'total_usd', label: 'TOTAL (USD)', defaultWidth: 110, numeric: true },
+  { key: 'origin', label: 'ORIGIN', defaultWidth: 130, filterable: true },
+  { key: 'destination', label: 'DESTINATION', defaultWidth: 120, filterable: true },
+  { key: 'exporter', label: 'EXPORTER', defaultWidth: 190, filterable: true },
+  { key: 'importer', label: 'IMPORTER', defaultWidth: 190, filterable: true },
+  { key: 'type', label: 'TYPE', defaultWidth: 130, filterable: true },
 ];
 
 const TYPE_COLORS: Record<string, string> = {
@@ -62,23 +69,23 @@ function parseDate(val: unknown): string | null {
   if (!val) return null;
   if (typeof val === 'number') {
     const d = XLSX.SSF.parse_date_code(val);
-    if (d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+    if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
   }
   if (typeof val === 'string') {
     const cleaned = val.trim();
     const parts = cleaned.match(/(\d{1,2})[\/\-\.](\w+)[\/\-\.](\d{2,4})/);
     if (parts) {
-      const months: Record<string,string> = {
-        jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
-        jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12',
+      const months: Record<string, string> = {
+        jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+        jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
       };
-      const day = parts[1].padStart(2,'0');
-      const mo = months[parts[2].toLowerCase()] || parts[2].padStart(2,'0');
+      const day = parts[1].padStart(2, '0');
+      const mo = months[parts[2].toLowerCase()] || parts[2].padStart(2, '0');
       const yr = parts[3].length === 2 ? `20${parts[3]}` : parts[3];
       return `${yr}-${mo}-${day}`;
     }
     const d = new Date(cleaned);
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
   return null;
 }
@@ -86,32 +93,39 @@ function parseDate(val: unknown): string | null {
 function formatDisplayDate(val: string | null): string {
   if (!val) return '-';
   const d = new Date(val + 'T00:00:00');
-  const day = d.getDate();
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${day}-${months[d.getMonth()]}-${d.getFullYear()}`;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${d.getDate()}-${months[d.getMonth()]}-${d.getFullYear()}`;
 }
 
 function fmtNum(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function getCellValue(row: ImportRow, key: SortField): string | number {
+  const v = row[key];
+  return v ?? '';
+}
+
 export function ImportInfo() {
-  const [rows, setRows] = useState<ImportRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [sortField, setSortField] = useState<SortField>('date');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [colFilters, setColFilters] = useState<Partial<Record<SortField, string>>>({});
-  const [openFilter, setOpenFilter] = useState<SortField | null>(null);
+  const [allRows, setAllRows] = useState<ImportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [userRole, setUserRole] = useState<string>('');
+
+  const [search, setSearch] = useState('');
+  const [colFilters, setColFilters] = useState<Partial<Record<SortField, string>>>({});
+  const [sortField, setSortField] = useState<SortField>('date');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  // Column widths (resizable)
+  const [colWidths, setColWidths] = useState<Record<string, number>>(
+    () => Object.fromEntries(COLS.map(c => [c.key, c.defaultWidth]))
+  );
+
   const fileRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const resizingRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
 
   useEffect(() => {
     supabase.from('user_profiles').select('role').maybeSingle().then(({ data }) => {
@@ -119,56 +133,88 @@ export function ImportInfo() {
     });
   }, []);
 
-  useEffect(() => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setDebouncedSearch(search);
-      setPage(0);
-    }, 300);
-    return () => clearTimeout(debounceRef.current);
-  }, [search]);
-
-  const fetchData = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      let q = supabase.from('import_data').select('*', { count: 'exact' });
-
-      if (debouncedSearch) {
-        const s = `%${debouncedSearch}%`;
-        q = q.or(`product_name.ilike.${s},importer.ilike.${s},exporter.ilike.${s}`);
+      let allData: ImportRow[] = [];
+      let from = 0;
+      const chunk = 1000;
+      while (true) {
+        const { data, error } = await supabase
+          .from('import_data')
+          .select('id,date,hs_code,product_name,quantity,unit,unit_rate,currency,total_usd,origin,destination,exporter,importer,type')
+          .range(from, from + chunk - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData = allData.concat(data as ImportRow[]);
+        if (data.length < chunk) break;
+        from += chunk;
       }
-
-      Object.entries(colFilters).forEach(([k, v]) => {
-        if (v) q = q.ilike(k as string, `%${v}%`);
-      });
-
-      q = q.order(sortField as string, { ascending: sortDir === 'asc' });
-      q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-      const { data, count, error } = await q;
-      if (error) throw error;
-      setRows((data as ImportRow[]) || []);
-      setTotal(count || 0);
+      setAllRows(allData);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, sortField, sortDir, colFilters, page]);
+  }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Client-side filtering + sorting (instant, no debounce needed)
+  const filteredRows = useMemo(() => {
+    let rows = allRows;
+
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      rows = rows.filter(r =>
+        r.product_name?.toLowerCase().includes(s) ||
+        r.importer?.toLowerCase().includes(s) ||
+        r.exporter?.toLowerCase().includes(s)
+      );
+    }
+
+    Object.entries(colFilters).forEach(([k, v]) => {
+      if (!v) return;
+      const lo = v.toLowerCase();
+      rows = rows.filter(r => String((r as Record<string,unknown>)[k] ?? '').toLowerCase().includes(lo));
+    });
+
+    rows = [...rows].sort((a, b) => {
+      const av = getCellValue(a, sortField);
+      const bv = getCellValue(b, sortField);
+      let cmp = 0;
+      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+      else cmp = String(av).localeCompare(String(bv));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return rows;
+  }, [allRows, search, colFilters, sortField, sortDir]);
 
   function handleSort(field: SortField) {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortField(field); setSortDir('asc'); }
-    setPage(0);
   }
 
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ChevronsUpDown className="w-3 h-3 text-gray-400" />;
-    return sortDir === 'asc'
-      ? <ChevronUp className="w-3 h-3 text-blue-600" />
-      : <ChevronDown className="w-3 h-3 text-blue-600" />;
+  // Column resize
+  function onResizeMouseDown(e: React.MouseEvent, key: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingRef.current = { key, startX: e.clientX, startW: colWidths[key] };
+
+    function onMove(ev: MouseEvent) {
+      if (!resizingRef.current) return;
+      const delta = ev.clientX - resizingRef.current.startX;
+      const newW = Math.max(40, resizingRef.current.startW + delta);
+      setColWidths(prev => ({ ...prev, [resizingRef.current!.key]: newW }));
+    }
+    function onUp() {
+      resizingRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -228,8 +274,7 @@ export function ImportInfo() {
       }
 
       setUploadMsg({ type: 'success', text: `Successfully imported ${inserted} records.` });
-      setPage(0);
-      fetchData();
+      fetchAll();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Upload failed';
       setUploadMsg({ type: 'error', text: msg });
@@ -241,13 +286,13 @@ export function ImportInfo() {
 
   async function handleClearData() {
     const { error } = await supabase.from('import_data').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    if (!error) { setRows([]); setTotal(0); setShowClearConfirm(false); }
+    if (!error) { setAllRows([]); setShowClearConfirm(false); }
   }
 
   function downloadCSV() {
-    if (!rows.length) return;
+    if (!filteredRows.length) return;
     const headers = COLS.map(c => c.label);
-    const csvRows = rows.map(r => [
+    const csvRows = filteredRows.map(r => [
       r.date || '', r.hs_code, r.product_name, r.quantity, r.unit,
       r.unit_rate, r.currency, r.total_usd, r.origin, r.destination,
       r.exporter, r.importer, r.type,
@@ -262,13 +307,13 @@ export function ImportInfo() {
     a.click();
   }
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
-  const activeFilters = Object.values(colFilters).filter(Boolean).length;
+  const activeColFilters = Object.values(colFilters).filter(Boolean).length;
+  const isFiltered = search.trim() || activeColFilters > 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
       {/* Top Bar */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-4 flex-shrink-0">
+      <div className="flex flex-col sm:flex-row gap-2 mb-3 flex-shrink-0">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -276,7 +321,7 @@ export function ImportInfo() {
             placeholder="Search product, importer, exporter..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -284,26 +329,26 @@ export function ImportInfo() {
             </button>
           )}
         </div>
-        <div className="flex gap-2">
-          {activeFilters > 0 && (
-            <button onClick={() => setColFilters({})} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-amber-50 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100">
-              <Filter className="w-3.5 h-3.5" />
-              Clear {activeFilters} filter{activeFilters > 1 ? 's' : ''}
+        <div className="flex gap-2 flex-wrap">
+          {isFiltered && (
+            <button onClick={() => { setSearch(''); setColFilters({}); }} className="flex items-center gap-1.5 px-3 py-2 text-xs bg-amber-50 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100">
+              <X className="w-3 h-3" />
+              Clear filters
             </button>
           )}
-          <button onClick={downloadCSV} disabled={!rows.length} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">
+          <button onClick={downloadCSV} disabled={!filteredRows.length} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">
             <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Export</span>
+            <span className="hidden sm:inline text-xs">Export CSV</span>
           </button>
           {(userRole === 'admin' || userRole === 'manager') && (
             <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50">
               <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Clear All</span>
+              <span className="hidden sm:inline text-xs">Clear All</span>
             </button>
           )}
-          <label className="flex items-center gap-1.5 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
+          <label className="flex items-center gap-1.5 px-3 py-2 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer whitespace-nowrap">
             <Upload className="w-3.5 h-3.5" />
-            <span>{uploading ? 'Uploading...' : 'Upload CSV/Excel'}</span>
+            {uploading ? 'Uploading...' : 'Upload CSV/Excel'}
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" disabled={uploading} />
           </label>
         </div>
@@ -311,68 +356,85 @@ export function ImportInfo() {
 
       {/* Upload Message */}
       {uploadMsg && (
-        <div className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm mb-3 flex-shrink-0 ${uploadMsg.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
-          {uploadMsg.type === 'error' && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs mb-2 flex-shrink-0 ${uploadMsg.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+          {uploadMsg.type === 'error' && <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />}
           {uploadMsg.text}
-          <button onClick={() => setUploadMsg(null)} className="ml-auto"><X className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setUploadMsg(null)} className="ml-auto"><X className="w-3 h-3" /></button>
         </div>
       )}
 
-      {/* Stats */}
-      <div className="flex items-center gap-3 mb-3 flex-shrink-0 text-xs text-gray-500">
-        <span className="font-medium text-gray-700">{total.toLocaleString()} records</span>
-        {(debouncedSearch || activeFilters > 0) && <span className="text-blue-600">(filtered)</span>}
-        <button onClick={fetchData} className="ml-auto flex items-center gap-1 hover:text-gray-700">
+      {/* Stats bar */}
+      <div className="flex items-center gap-3 mb-2 flex-shrink-0 text-xs text-gray-500">
+        <span>
+          <span className="font-semibold text-gray-700">{filteredRows.length.toLocaleString()}</span>
+          {isFiltered && <span className="text-blue-600"> filtered</span>}
+          {' '}of <span className="font-medium text-gray-600">{allRows.length.toLocaleString()}</span> records
+        </span>
+        <button onClick={fetchAll} className="ml-auto flex items-center gap-1 hover:text-gray-700 text-gray-400">
           <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </button>
       </div>
 
       {/* Table */}
-      {total === 0 && !loading ? (
+      {allRows.length === 0 && !loading ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center py-16 text-gray-400">
           <FileSpreadsheet className="w-12 h-12 mb-3 opacity-30" />
           <p className="font-medium text-gray-500 mb-1">No import data yet</p>
           <p className="text-sm">Upload a CSV or Excel file to get started</p>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-auto rounded-lg border border-gray-200 shadow-sm">
-          <table className="w-full text-xs border-collapse">
-            <thead className="sticky top-0 z-10">
+        <div className="flex-1 min-h-0 overflow-auto rounded-lg border border-gray-200 shadow-sm select-none">
+          <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', width: COLS.reduce((s, c) => s + (colWidths[c.key] || c.defaultWidth), 0) }}>
+            <thead className="sticky top-0 z-20">
               <tr className="bg-gray-700 text-white">
                 {COLS.map(col => (
-                  <th key={col.key} className={`${col.width} px-3 py-0 text-left font-semibold border-r border-gray-600 last:border-r-0`}>
+                  <th
+                    key={col.key}
+                    style={{ width: colWidths[col.key], minWidth: 40, position: 'relative', overflow: 'hidden' }}
+                    className="px-0 py-0 text-left font-semibold border-r border-gray-600 last:border-r-0"
+                  >
                     <div className="flex flex-col">
+                      {/* Sort row */}
                       <button
                         onClick={() => handleSort(col.key)}
-                        className="flex items-center gap-1 py-2 hover:text-blue-300 text-left w-full"
+                        className="flex items-center gap-1 px-2 pt-2 pb-1 hover:text-blue-300 text-left w-full truncate"
+                        title={col.label}
                       >
-                        {col.label}
-                        <SortIcon field={col.key} />
+                        <span className="truncate">{col.label}</span>
+                        {sortField === col.key
+                          ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 flex-shrink-0 text-blue-300" /> : <ChevronDown className="w-3 h-3 flex-shrink-0 text-blue-300" />)
+                          : <ChevronsUpDown className="w-3 h-3 flex-shrink-0 text-gray-400" />}
                       </button>
-                      <div className="pb-1.5 relative" onClick={e => e.stopPropagation()}>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            placeholder="Filter..."
-                            value={colFilters[col.key] || ''}
-                            onChange={e => {
-                              setColFilters(prev => ({ ...prev, [col.key]: e.target.value }));
-                              setPage(0);
-                            }}
-                            className="w-full px-2 py-1 text-xs bg-gray-600 text-white placeholder-gray-400 rounded border border-gray-500 focus:outline-none focus:border-blue-400"
-                          />
-                          {colFilters[col.key] && (
-                            <button
-                              onClick={() => setColFilters(prev => { const n = {...prev}; delete n[col.key]; return n; })}
-                              className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-                            >
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                          )}
-                        </div>
+                      {/* Filter row - only for filterable cols */}
+                      <div className="px-1.5 pb-1.5" onClick={e => e.stopPropagation()}>
+                        {col.filterable ? (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Filter..."
+                              value={colFilters[col.key] || ''}
+                              onChange={e => setColFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
+                              className="w-full px-1.5 py-0.5 text-[10px] bg-gray-600 text-white placeholder-gray-400 rounded border border-gray-500 focus:outline-none focus:border-blue-400"
+                            />
+                            {colFilters[col.key] && (
+                              <button
+                                onClick={() => setColFilters(prev => { const n = { ...prev }; delete n[col.key]; return n; })}
+                                className="absolute right-0.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                              ><X className="w-2 h-2" /></button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="h-[18px]" />
+                        )}
                       </div>
                     </div>
+                    {/* Resize handle */}
+                    <div
+                      onMouseDown={e => onResizeMouseDown(e, col.key)}
+                      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400 opacity-0 hover:opacity-100 z-10"
+                      style={{ background: 'rgba(96,165,250,0.5)' }}
+                    />
                   </th>
                 ))}
               </tr>
@@ -381,25 +443,37 @@ export function ImportInfo() {
               {loading ? (
                 <tr><td colSpan={COLS.length} className="text-center py-12 text-gray-400">
                   <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
-                  Loading...
+                  Loading all records...
                 </td></tr>
-              ) : rows.map((row, i) => (
-                <tr key={row.id} className={`border-b border-gray-100 hover:bg-blue-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap text-gray-600">{formatDisplayDate(row.date)}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap font-mono text-gray-600">{row.hs_code}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 font-medium text-gray-900">{row.product_name}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 text-right whitespace-nowrap text-gray-700">{row.quantity.toLocaleString()}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap text-gray-600">{row.unit}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 text-right whitespace-nowrap font-medium text-emerald-700">{fmtNum(row.unit_rate)}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap text-gray-600">{row.currency}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 text-right whitespace-nowrap font-medium text-blue-700">{fmtNum(row.total_usd)}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap text-gray-600">{row.origin}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 whitespace-nowrap text-gray-600">{row.destination}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 text-gray-700">{row.exporter}</td>
-                  <td className="px-3 py-2 border-r border-gray-100 text-gray-700">{row.importer}</td>
-                  <td className="px-3 py-2">
+              ) : filteredRows.length === 0 ? (
+                <tr><td colSpan={COLS.length} className="text-center py-10 text-gray-400">No records match your search.</td></tr>
+              ) : filteredRows.map((row, i) => (
+                <tr key={row.id} className={`border-b border-gray-100 hover:bg-blue-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
+                  <td style={{ width: colWidths.date, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 whitespace-nowrap text-gray-600">{formatDisplayDate(row.date)}</td>
+                  <td style={{ width: colWidths.hs_code, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 whitespace-nowrap font-mono text-gray-600 text-[11px]">{row.hs_code}</td>
+                  <td style={{ width: colWidths.product_name, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 font-medium text-gray-900" title={row.product_name}>
+                    <div className="truncate">{row.product_name}</div>
+                  </td>
+                  <td style={{ width: colWidths.quantity, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 text-right whitespace-nowrap text-gray-700">{row.quantity.toLocaleString()}</td>
+                  <td style={{ width: colWidths.unit, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 whitespace-nowrap text-gray-600">{row.unit}</td>
+                  <td style={{ width: colWidths.unit_rate, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 text-right whitespace-nowrap font-medium text-emerald-700">{fmtNum(row.unit_rate)}</td>
+                  <td style={{ width: colWidths.currency, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 whitespace-nowrap text-gray-600">{row.currency}</td>
+                  <td style={{ width: colWidths.total_usd, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 text-right whitespace-nowrap font-medium text-blue-700">{fmtNum(row.total_usd)}</td>
+                  <td style={{ width: colWidths.origin, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 text-gray-600" title={row.origin}>
+                    <div className="truncate">{row.origin}</div>
+                  </td>
+                  <td style={{ width: colWidths.destination, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 text-gray-600" title={row.destination}>
+                    <div className="truncate">{row.destination}</div>
+                  </td>
+                  <td style={{ width: colWidths.exporter, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 text-gray-700" title={row.exporter}>
+                    <div className="truncate">{row.exporter}</div>
+                  </td>
+                  <td style={{ width: colWidths.importer, overflow: 'hidden' }} className="px-2 py-1.5 border-r border-gray-100 text-gray-700" title={row.importer}>
+                    <div className="truncate">{row.importer}</div>
+                  </td>
+                  <td style={{ width: colWidths.type, overflow: 'hidden' }} className="px-2 py-1.5">
                     {row.type ? (
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${getTypeColor(row.type)}`}>
+                      <span className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap ${getTypeColor(row.type)}`}>
                         {row.type}
                       </span>
                     ) : '-'}
@@ -411,21 +485,7 @@ export function ImportInfo() {
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-3 flex-shrink-0 text-xs text-gray-600">
-          <span>Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total.toLocaleString()}</span>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setPage(0)} disabled={page === 0} className="px-2 py-1 rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50">«</button>
-            <button onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2 py-1 rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50">‹</button>
-            <span className="px-3 py-1 rounded bg-blue-600 text-white">{page + 1}</span>
-            <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages - 1} className="px-2 py-1 rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50">›</button>
-            <button onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1} className="px-2 py-1 rounded border border-gray-300 disabled:opacity-40 hover:bg-gray-50">»</button>
-          </div>
-        </div>
-      )}
-
-      {/* Clear Confirm Dialog */}
+      {/* Clear Confirm */}
       {showClearConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
@@ -433,7 +493,7 @@ export function ImportInfo() {
               <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
               <h3 className="font-semibold text-gray-900">Clear all import data?</h3>
             </div>
-            <p className="text-sm text-gray-600 mb-5">This will permanently delete all {total.toLocaleString()} records. This cannot be undone.</p>
+            <p className="text-sm text-gray-600 mb-5">This permanently deletes all {allRows.length.toLocaleString()} records and cannot be undone.</p>
             <div className="flex gap-3">
               <button onClick={() => setShowClearConfirm(false)} className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
               <button onClick={handleClearData} className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">Delete All</button>
