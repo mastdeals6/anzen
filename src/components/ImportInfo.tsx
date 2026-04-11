@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import {
-  Upload, Search, Download, Trash2, ChevronUp, ChevronDown,
-  ChevronsUpDown, X, RefreshCw, AlertCircle, FileSpreadsheet, Loader2,
+  Upload, Search, Trash2, ChevronUp, ChevronDown,
+  ChevronsUpDown, X, RefreshCw, AlertCircle, FileSpreadsheet, Loader2, ChevronDown as ChevronDownIcon,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -31,23 +31,23 @@ interface ColDef {
   label: string;
   defaultWidth: number;
   numeric?: boolean;
-  filterable?: boolean;
+  small?: boolean;
 }
 
 const COLS: ColDef[] = [
-  { key: 'date', label: 'DATE', defaultWidth: 100 },
-  { key: 'hs_code', label: 'HS CODE', defaultWidth: 100 },
-  { key: 'product_name', label: 'PRODUCT', defaultWidth: 220, filterable: true },
+  { key: 'date', label: 'DATE', defaultWidth: 100, small: true },
+  { key: 'hs_code', label: 'HS CODE', defaultWidth: 100, small: true },
+  { key: 'product_name', label: 'PRODUCT', defaultWidth: 220 },
   { key: 'quantity', label: 'QTY', defaultWidth: 75, numeric: true },
-  { key: 'unit', label: 'UNIT', defaultWidth: 80 },
+  { key: 'unit', label: 'UNIT', defaultWidth: 80, small: true },
   { key: 'unit_rate', label: 'UNIT RATE', defaultWidth: 95, numeric: true },
   { key: 'currency', label: 'CURRENCY', defaultWidth: 82 },
   { key: 'total_usd', label: 'TOTAL (USD)', defaultWidth: 110, numeric: true },
-  { key: 'origin', label: 'ORIGIN', defaultWidth: 130, filterable: true },
-  { key: 'destination', label: 'DESTINATION', defaultWidth: 115, filterable: true },
-  { key: 'exporter', label: 'EXPORTER', defaultWidth: 185, filterable: true },
-  { key: 'importer', label: 'IMPORTER', defaultWidth: 185, filterable: true },
-  { key: 'type', label: 'TYPE', defaultWidth: 130, filterable: true },
+  { key: 'origin', label: 'ORIGIN', defaultWidth: 130 },
+  { key: 'destination', label: 'DESTINATION', defaultWidth: 115 },
+  { key: 'exporter', label: 'EXPORTER', defaultWidth: 185 },
+  { key: 'importer', label: 'IMPORTER', defaultWidth: 185 },
+  { key: 'type', label: 'TYPE', defaultWidth: 130 },
 ];
 
 const PAGE_SIZE = 200;
@@ -99,10 +99,12 @@ export function ImportInfo() {
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const [search, setSearch] = useState('');
-  const [activeSearch, setActiveSearch] = useState('');
-  const [colFilters, setColFilters] = useState<Partial<Record<SortField, string>>>({});
-  const [activeColFilters, setActiveColFilters] = useState<Partial<Record<SortField, string>>>({});
+  const [productSearch, setProductSearch] = useState('');
+  const [companySearch, setCompanySearch] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [activeProductSearch, setActiveProductSearch] = useState('');
+  const [activeCompanySearch, setActiveCompanySearch] = useState('');
+
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -125,16 +127,15 @@ export function ImportInfo() {
     });
   }, []);
 
-  // Debounce search + colFilters → fire query after 180ms idle
   useEffect(() => {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      setActiveSearch(search);
-      setActiveColFilters({ ...colFilters });
+      setActiveProductSearch(productSearch);
+      setActiveCompanySearch(companySearch);
       setPage(0);
     }, 180);
     return () => clearTimeout(debounceRef.current);
-  }, [search, colFilters]);
+  }, [productSearch, companySearch]);
 
   const fetchPage = useCallback(async (pg: number) => {
     setLoading(true);
@@ -143,14 +144,15 @@ export function ImportInfo() {
         .from('import_data')
         .select('id,date,hs_code,product_name,quantity,unit,unit_rate,currency,total_usd,origin,destination,exporter,importer,type', { count: 'exact' });
 
-      if (activeSearch.trim()) {
-        const s = `%${activeSearch.trim()}%`;
-        q = q.or(`product_name.ilike.${s},importer.ilike.${s},exporter.ilike.${s}`);
+      if (activeProductSearch.trim()) {
+        const s = `%${activeProductSearch.trim()}%`;
+        q = q.ilike('product_name', s);
       }
 
-      Object.entries(activeColFilters).forEach(([k, v]) => {
-        if (v?.trim()) q = q.ilike(k, `%${v.trim()}%`);
-      });
+      if (activeCompanySearch.trim()) {
+        const s = `%${activeCompanySearch.trim()}%`;
+        q = q.or(`importer.ilike.${s},exporter.ilike.${s}`);
+      }
 
       q = q.order(sortField as string, { ascending: sortDir === 'asc' });
       q = q.range(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE - 1);
@@ -164,7 +166,7 @@ export function ImportInfo() {
     } finally {
       setLoading(false);
     }
-  }, [activeSearch, activeColFilters, sortField, sortDir]);
+  }, [activeProductSearch, activeCompanySearch, sortField, sortDir]);
 
   useEffect(() => { fetchPage(page); }, [fetchPage, page]);
 
@@ -232,7 +234,8 @@ export function ImportInfo() {
       }
       setUploadMsg({ type: 'success', text: `Imported ${inserted.toLocaleString()} records.` });
       setPage(0);
-      setActiveSearch(''); setSearch(''); setActiveColFilters({}); setColFilters({});
+      setActiveProductSearch(''); setProductSearch('');
+      setActiveCompanySearch(''); setCompanySearch('');
     } catch (err) {
       setUploadMsg({ type: 'error', text: err instanceof Error ? err.message : 'Upload failed' });
     } finally {
@@ -246,61 +249,87 @@ export function ImportInfo() {
     setRows([]); setTotal(0); setShowClear(false);
   }
 
-  function downloadCSV() {
-    if (!rows.length) return;
-    const h = COLS.map(c => c.label);
-    const body = rows.map(r => [r.date||'',r.hs_code,r.product_name,r.quantity,r.unit,r.unit_rate,r.currency,r.total_usd,r.origin,r.destination,r.exporter,r.importer,r.type]);
-    const csv = [h,...body].map(row => row.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = 'import_data.csv'; a.click();
-  }
-
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const hasFilters = !!(activeSearch.trim() || Object.values(activeColFilters).some(v => v?.trim()));
+  const hasFilters = !!(activeProductSearch.trim() || activeCompanySearch.trim());
   const tableW = useMemo(() => COLS.reduce((s, c) => s + (colWidths[c.key] || c.defaultWidth), 0), [colWidths]);
+
+  function clearSearch() {
+    setProductSearch(''); setCompanySearch('');
+  }
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 210px)', minHeight: 480 }}>
 
       {/* Top bar */}
-      <div className="flex flex-col sm:flex-row gap-2 mb-3 flex-shrink-0">
-        <div className="relative flex-1 min-w-0">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search product, importer, exporter…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-blue-400" />}
-          {!loading && search && (
-            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {hasFilters && (
-            <button onClick={() => { setSearch(''); setColFilters({}); }} className="flex items-center gap-1 px-3 py-2 text-xs bg-amber-50 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100">
-              <X className="w-3 h-3" /> Clear filters
-            </button>
-          )}
-          <button onClick={downloadCSV} disabled={!rows.length} className="flex items-center gap-1.5 px-3 py-2 text-xs bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">
-            <Download className="w-3.5 h-3.5" /> Export CSV
+      <div className="flex flex-col gap-2 mb-3 flex-shrink-0">
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Primary search: product name */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search product name…"
+              value={productSearch}
+              onChange={e => setProductSearch(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-blue-400" />}
+            {!loading && productSearch && (
+              <button onClick={() => setProductSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Advanced toggle */}
+          <button
+            onClick={() => setShowAdvanced(p => !p)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs border rounded-lg transition-colors whitespace-nowrap ${showAdvanced ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+          >
+            Advanced
+            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
           </button>
+
+          {hasFilters && (
+            <button onClick={clearSearch} className="flex items-center gap-1 px-3 py-2 text-xs bg-amber-50 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100 whitespace-nowrap">
+              <X className="w-3 h-3" /> Clear
+            </button>
+          )}
+
           {(userRole === 'admin' || userRole === 'manager') && (
-            <button onClick={() => setShowClear(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50">
+            <button onClick={() => setShowClear(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50 whitespace-nowrap">
               <Trash2 className="w-3.5 h-3.5" /> Clear All
             </button>
           )}
+
           <label className="flex items-center gap-1.5 px-3 py-2 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer whitespace-nowrap">
             <Upload className="w-3.5 h-3.5" />
             {uploading ? 'Uploading…' : 'Upload CSV/Excel'}
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleUpload} className="hidden" disabled={uploading} />
           </label>
         </div>
+
+        {/* Advanced search row */}
+        {showAdvanced && (
+          <div className="flex gap-2 flex-wrap items-center p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Company name (importer / exporter)…"
+                value={companySearch}
+                onChange={e => setCompanySearch(e.target.value)}
+                className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
+              {companySearch && (
+                <button onClick={() => setCompanySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <span className="text-xs text-gray-400">Searches both importer and exporter fields</span>
+          </div>
+        )}
       </div>
 
       {/* Upload message */}
@@ -348,32 +377,13 @@ export function ImportInfo() {
                 {COLS.map(col => (
                   <th key={col.key} style={{ width: colWidths[col.key], minWidth: 36, position: 'relative' }}
                     className="px-0 py-0 text-left font-semibold border-r border-gray-600 last:border-r-0 overflow-hidden">
-                    <div className="flex flex-col">
-                      <button onClick={() => handleSort(col.key)}
-                        className="flex items-center gap-1 px-2 pt-1.5 pb-1 hover:text-blue-300 text-left w-full overflow-hidden" title={col.label}>
-                        <span className="truncate">{col.label}</span>
-                        {sortField === col.key
-                          ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 flex-shrink-0 text-blue-300" /> : <ChevronDown className="w-3 h-3 flex-shrink-0 text-blue-300" />)
-                          : <ChevronsUpDown className="w-3 h-3 flex-shrink-0 text-gray-500" />}
-                      </button>
-                      <div className="px-1.5 pb-1.5 h-[26px]" onClick={e => e.stopPropagation()}>
-                        {col.filterable ? (
-                          <div className="relative">
-                            <input type="text" placeholder="Filter…"
-                              value={colFilters[col.key] || ''}
-                              onChange={e => setColFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
-                              className="w-full px-1.5 py-0.5 text-[10px] bg-gray-600 text-white placeholder-gray-400 rounded border border-gray-500 focus:outline-none focus:border-blue-400"
-                            />
-                            {colFilters[col.key] && (
-                              <button onClick={() => setColFilters(prev => { const n = { ...prev }; delete n[col.key]; return n; })}
-                                className="absolute right-0.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
-                                <X className="w-2 h-2" />
-                              </button>
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
+                    <button onClick={() => handleSort(col.key)}
+                      className="flex items-center gap-1 px-2 py-1.5 hover:text-blue-300 text-left w-full overflow-hidden" title={col.label}>
+                      <span className={`truncate ${col.small ? 'text-[9px] font-medium tracking-wide text-gray-300' : 'text-xs'}`}>{col.label}</span>
+                      {sortField === col.key
+                        ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 flex-shrink-0 text-blue-300" /> : <ChevronDown className="w-3 h-3 flex-shrink-0 text-blue-300" />)
+                        : <ChevronsUpDown className="w-3 h-3 flex-shrink-0 text-gray-500" />}
+                    </button>
                     {/* Resize handle */}
                     <div onMouseDown={e => onResizeMouseDown(e, col.key)}
                       className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize z-10"
