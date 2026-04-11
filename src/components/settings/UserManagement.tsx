@@ -160,12 +160,25 @@ export function UserManagement({ users, onRefresh }: UserManagementProps) {
     if (!await showConfirm({ title: 'Confirm', message: `Are you sure you want to permanently delete user "${username}"? This cannot be undone.`, variant: 'danger', confirmLabel: 'Delete' })) return;
 
     try {
-      const { error } = await supabase.from('user_profiles').delete().eq('id', userId);
-      if (error) throw error;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-delete-user`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: userId }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to delete user');
+
       showToast({ type: 'success', title: 'Success', message: 'User deleted successfully!' });
       onRefresh();
-    } catch {
-      showToast({ type: 'error', title: 'Error', message: 'Failed to delete user. The user may have associated records.' });
+    } catch (error: any) {
+      showToast({ type: 'error', title: 'Error', message: error.message || 'Failed to delete user.' });
     }
   };
 
