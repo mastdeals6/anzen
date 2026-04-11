@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { X, Printer, Download } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import jsPDF from 'jspdf';
@@ -52,6 +52,12 @@ interface ProformaInvoiceViewProps {
 export function ProformaInvoiceView({ salesOrder, items, onClose }: ProformaInvoiceViewProps) {
   const printRef = useRef<HTMLDivElement>(null);
   const { t, language } = useLanguage();
+
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
 
   const currency = salesOrder.currency || 'IDR';
   const currencySymbol = currency === 'IDR' ? 'Rp' : currency === 'USD' ? '$' : currency;

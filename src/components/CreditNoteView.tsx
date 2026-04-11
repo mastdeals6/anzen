@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { X, Printer, Download } from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 import jsPDF from 'jspdf';
@@ -48,6 +48,12 @@ interface CreditNoteViewProps {
 export function CreditNoteView({ creditNote, items, onClose }: CreditNoteViewProps) {
   const printRef = useRef<HTMLDivElement>(null);
   const { language } = useLanguage();
+
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
 
   const formatCurrency = (amount: number | undefined | null) => {
     if (amount === undefined || amount === null) return 'Rp 0,00';
