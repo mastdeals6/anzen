@@ -307,91 +307,82 @@ export function ImportInfo() {
     <div className="flex flex-col" style={{ height: 'calc(100vh - 210px)', minHeight: 480 }}>
 
       {/* ── Filter Builder ── */}
-      <div className="flex gap-3 mb-3 flex-shrink-0 items-start">
+      <div className="flex flex-col gap-1.5 mb-2 flex-shrink-0 bg-gray-50 border border-gray-200 rounded-lg p-2">
+        {/* Filter rows */}
+        {filters.map((f) => (
+          <div key={f.id} className="flex items-center gap-1.5">
+            <select
+              value={f.field}
+              onChange={e => setFilterField(f.id, e.target.value as SortField)}
+              className="w-28 px-1.5 py-1 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 text-gray-700 font-medium flex-shrink-0"
+            >
+              {FILTER_FIELDS.map(ff => (
+                <option key={ff.value} value={ff.value}>{ff.label}</option>
+              ))}
+            </select>
 
-        {/* Left: filter rows */}
-        <div className="flex-1 min-w-0 border border-gray-200 rounded-lg bg-gray-50 p-3 flex flex-col gap-2">
-          {filters.map((f, idx) => (
-            <div key={f.id} className="flex items-center gap-2">
-              {/* Field selector */}
-              <select
-                value={f.field}
-                onChange={e => setFilterField(f.id, e.target.value as SortField)}
-                className="w-36 px-2 py-1.5 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 text-gray-700 font-medium"
-              >
-                {FILTER_FIELDS.map(ff => (
-                  <option key={ff.value} value={ff.value}>{ff.label}</option>
-                ))}
-              </select>
+            <span className="text-[10px] text-gray-400 select-none flex-shrink-0">contains</span>
 
-              {/* Operator — always "contains" */}
-              <span className="px-2 py-1.5 text-xs border border-gray-200 rounded bg-white text-gray-400 select-none whitespace-nowrap">
-                contains
-              </span>
-
-              {/* Value input */}
-              <div className="relative flex-1 min-w-0">
-                <input
-                  type="text"
-                  value={f.value}
-                  onChange={e => setFilterValue(f.id, e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
-                  placeholder={`Filter by ${FILTER_FIELDS.find(ff => ff.value === f.field)?.label ?? f.field}…`}
-                  className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 text-gray-800"
-                />
-                {f.value && (
-                  <button onClick={() => setFilterValue(f.id, '')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-
-              {/* Remove row */}
-              <button
-                onClick={() => removeFilter(f.id)}
-                disabled={filters.length === 1}
-                className="p-1 text-gray-400 hover:text-red-500 disabled:opacity-20 transition-colors"
-                title="Remove condition"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+            <div className="relative flex-1 min-w-0">
+              <input
+                type="text"
+                value={f.value}
+                onChange={e => setFilterValue(f.id, e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
+                placeholder={`${FILTER_FIELDS.find(ff => ff.value === f.field)?.label ?? f.field}…`}
+                className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 text-gray-800"
+              />
+              {f.value && (
+                <button onClick={() => setFilterValue(f.id, '')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
             </div>
-          ))}
 
-          {/* Add condition */}
+            <button
+              onClick={() => removeFilter(f.id)}
+              disabled={filters.length === 1}
+              className="p-0.5 text-gray-300 hover:text-red-400 disabled:opacity-0 transition-colors flex-shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+
+        {/* Bottom bar: add condition + actions */}
+        <div className="flex items-center gap-2 pt-0.5">
           <button
             onClick={addFilter}
             disabled={filters.length >= FILTER_FIELDS.length}
-            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 disabled:opacity-30 mt-0.5 w-fit"
+            className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-700 disabled:opacity-30"
           >
             <Plus className="w-3 h-3" />
-            Add search condition
+            Add condition
           </button>
-        </div>
 
-        {/* Right: action buttons + upload */}
-        <div className="flex flex-col gap-2 flex-shrink-0">
+          <div className="flex-1" />
+
           <button
             onClick={handleSearch}
-            className="flex items-center gap-1.5 px-5 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap"
+            className="flex items-center gap-1 px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
           >
-            <Search className="w-3.5 h-3.5" />
+            <Search className="w-3 h-3" />
             Search
           </button>
           <button
             onClick={handleReset}
-            className="flex items-center justify-center gap-1.5 px-5 py-1.5 text-sm font-medium border border-gray-300 bg-white text-gray-600 rounded-lg hover:bg-gray-50 transition-colors"
+            className="px-3 py-1 text-xs font-medium border border-gray-300 bg-white text-gray-600 rounded hover:bg-gray-100 transition-colors"
           >
             Reset
           </button>
-          <label className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 cursor-pointer whitespace-nowrap transition-colors">
-            <Upload className="w-3.5 h-3.5" />
-            {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Upload CSV/Excel'}
+          <label className="flex items-center gap-1 px-3 py-1 text-xs font-medium bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-100 cursor-pointer transition-colors whitespace-nowrap">
+            <Upload className="w-3 h-3" />
+            {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Upload'}
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleUpload} className="hidden" disabled={uploading} />
           </label>
           {(userRole === 'admin' || userRole === 'manager') && (
-            <button onClick={() => setShowClear(true)} className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs border border-red-200 text-red-500 rounded-lg hover:bg-red-50 transition-colors">
-              <Trash2 className="w-3 h-3" /> Clear All
+            <button onClick={() => setShowClear(true)} className="p-1 text-red-400 hover:text-red-600 transition-colors" title="Clear all data">
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
         </div>

@@ -78,14 +78,14 @@ export function Layout({ children }: LayoutProps) {
 
   // Auto-collapse sidebar for specific pages
   const autoCollapsiblePages = ['crm', 'command-center', 'finance'];
-  const shouldAutoCollapse = autoCollapsiblePages.includes(currentPage);
+  const shouldAutoCollapse = true;
 
   // Automatically collapse sidebar when entering CRM or Command Center
   useEffect(() => {
-    if (shouldAutoCollapse && !sidebarCollapsed) {
+    if (autoCollapsiblePages.includes(currentPage) && !sidebarCollapsed) {
       setSidebarCollapsed(true);
     }
-  }, [currentPage, shouldAutoCollapse, sidebarCollapsed, setSidebarCollapsed]);
+  }, [currentPage, sidebarCollapsed, setSidebarCollapsed]);
 
   const menuItems = [
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
@@ -192,15 +192,13 @@ export function Layout({ children }: LayoutProps) {
               >
                 <Menu className="w-6 h-6" />
               </button>
-              {shouldAutoCollapse && (
-                <button
-                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                  className="hidden lg:block p-2 rounded hover:bg-gray-100"
-                  title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                >
-                  <Menu className="w-6 h-6" />
-                </button>
-              )}
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="hidden lg:block p-2 rounded hover:bg-gray-100"
+                title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                <Menu className="w-6 h-6" />
+              </button>
             </div>
 
             {/* Desktop date range */}
