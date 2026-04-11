@@ -134,10 +134,9 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
 
   const fixStaleStatuses = async () => {
     try {
-      // Single bulk UPDATE — no loop, handles discounts + rounding edge cases
       await supabase
         .from('purchase_invoices')
-        .update({ status: 'paid', balance_amount: 0 })
+        .update({ status: 'paid' })
         .eq('status', 'partial')
         .lte('balance_amount', 0.99);
     } catch (e) {
@@ -480,7 +479,6 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
         const newStatus = effectiveBalance <= 0 ? 'paid' : (editingInvoice.paid_amount || 0) > 0 ? 'partial' : 'unpaid';
         const editInvoiceData = {
           ...invoiceData,
-          balance_amount: effectiveBalance,
           status: newStatus,
         };
         let { error: updateError } = await supabase
