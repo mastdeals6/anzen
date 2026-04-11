@@ -180,8 +180,10 @@ export function ImportInfo() {
     e.stopPropagation();
     resizingRef.current = { key, startX: e.clientX, startW: colWidths[key] };
     function onMove(ev: MouseEvent) {
-      if (!resizingRef.current) return;
-      setColWidths(prev => ({ ...prev, [resizingRef.current!.key]: Math.max(36, resizingRef.current!.startW + ev.clientX - resizingRef.current!.startX) }));
+      const r = resizingRef.current;
+      if (!r) return;
+      const newW = Math.max(36, r.startW + ev.clientX - r.startX);
+      setColWidths(prev => ({ ...prev, [r.key]: newW }));
     }
     function onUp() { resizingRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
     window.addEventListener('mousemove', onMove);
