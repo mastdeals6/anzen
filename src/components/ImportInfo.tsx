@@ -31,23 +31,23 @@ interface ColDef {
   label: string;
   defaultWidth: number;
   numeric?: boolean;
-  small?: boolean;
+  dimHeader?: boolean;
 }
 
 const COLS: ColDef[] = [
-  { key: 'date', label: 'DATE', defaultWidth: 100, small: true },
-  { key: 'hs_code', label: 'HS CODE', defaultWidth: 100, small: true },
-  { key: 'product_name', label: 'PRODUCT', defaultWidth: 220 },
-  { key: 'quantity', label: 'QTY', defaultWidth: 75, numeric: true },
-  { key: 'unit', label: 'UNIT', defaultWidth: 80, small: true },
-  { key: 'unit_rate', label: 'UNIT RATE', defaultWidth: 95, numeric: true },
-  { key: 'currency', label: 'CURRENCY', defaultWidth: 82 },
-  { key: 'total_usd', label: 'TOTAL (USD)', defaultWidth: 110, numeric: true },
-  { key: 'origin', label: 'ORIGIN', defaultWidth: 130 },
-  { key: 'destination', label: 'DESTINATION', defaultWidth: 115 },
-  { key: 'exporter', label: 'EXPORTER', defaultWidth: 185 },
-  { key: 'importer', label: 'IMPORTER', defaultWidth: 185 },
-  { key: 'type', label: 'TYPE', defaultWidth: 130 },
+  { key: 'date',        label: 'DATE',        defaultWidth: 90,  dimHeader: true },
+  { key: 'hs_code',     label: 'HS CODE',     defaultWidth: 95,  dimHeader: true },
+  { key: 'product_name',label: 'PRODUCT',     defaultWidth: 210 },
+  { key: 'quantity',    label: 'QTY',         defaultWidth: 70,  numeric: true },
+  { key: 'unit',        label: 'UNIT',        defaultWidth: 68,  dimHeader: true },
+  { key: 'unit_rate',   label: 'RATE',        defaultWidth: 88,  numeric: true },
+  { key: 'currency',    label: 'CCY',         defaultWidth: 58,  dimHeader: true },
+  { key: 'total_usd',   label: 'TOTAL USD',   defaultWidth: 105, numeric: true },
+  { key: 'origin',      label: 'ORIGIN',      defaultWidth: 125 },
+  { key: 'destination', label: 'DEST.',       defaultWidth: 105 },
+  { key: 'exporter',    label: 'EXPORTER',    defaultWidth: 180 },
+  { key: 'importer',    label: 'IMPORTER',    defaultWidth: 180 },
+  { key: 'type',        label: 'TYPE',        defaultWidth: 125 },
 ];
 
 const PAGE_SIZE = 200;
@@ -62,6 +62,27 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 function getTypeColor(t: string) { return TYPE_COLORS[t] || 'bg-gray-100 text-gray-700'; }
+
+function abbreviateUnit(u: string): string {
+  const map: Record<string, string> = {
+    'kilogram': 'KG', 'kilograms': 'KG', 'kg': 'KG',
+    'gram': 'G', 'grams': 'G', 'g': 'G',
+    'liter': 'L', 'liters': 'L', 'litre': 'L', 'litres': 'L', 'l': 'L',
+    'milliliter': 'ML', 'milliliters': 'ML', 'ml': 'ML',
+    'meter': 'M', 'meters': 'M', 'metre': 'M', 'metres': 'M',
+    'piece': 'PCS', 'pieces': 'PCS', 'pcs': 'PCS', 'pc': 'PCS',
+    'unit': 'PCS', 'units': 'PCS',
+    'tablet': 'TAB', 'tablets': 'TAB',
+    'capsule': 'CAP', 'capsules': 'CAP',
+    'bottle': 'BTL', 'bottles': 'BTL',
+    'box': 'BOX', 'boxes': 'BOX',
+    'bag': 'BAG', 'bags': 'BAG',
+    'drum': 'DRM', 'drums': 'DRM',
+    'ton': 'TON', 'tons': 'TON', 'tonne': 'TON', 'tonnes': 'TON', 'mt': 'MT',
+    'milligram': 'MG', 'milligrams': 'MG', 'mg': 'MG',
+  };
+  return map[u.toLowerCase().trim()] || u;
+}
 
 function parseDate(val: unknown): string | null {
   if (!val) return null;
@@ -133,7 +154,7 @@ export function ImportInfo() {
       setActiveProductSearch(productSearch);
       setActiveCompanySearch(companySearch);
       setPage(0);
-    }, 180);
+    }, 220);
     return () => clearTimeout(debounceRef.current);
   }, [productSearch, companySearch]);
 
@@ -145,8 +166,7 @@ export function ImportInfo() {
         .select('id,date,hs_code,product_name,quantity,unit,unit_rate,currency,total_usd,origin,destination,exporter,importer,type', { count: 'exact' });
 
       if (activeProductSearch.trim()) {
-        const s = `%${activeProductSearch.trim()}%`;
-        q = q.ilike('product_name', s);
+        q = q.ilike('product_name', `%${activeProductSearch.trim()}%`);
       }
 
       if (activeCompanySearch.trim()) {
@@ -184,8 +204,7 @@ export function ImportInfo() {
     function onMove(ev: MouseEvent) {
       const r = resizingRef.current;
       if (!r) return;
-      const newW = Math.max(36, r.startW + ev.clientX - r.startX);
-      setColWidths(prev => ({ ...prev, [r.key]: newW }));
+      setColWidths(prev => ({ ...prev, [r.key]: Math.max(36, r.startW + ev.clientX - r.startX) }));
     }
     function onUp() { resizingRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
     window.addEventListener('mousemove', onMove);
@@ -234,8 +253,7 @@ export function ImportInfo() {
       }
       setUploadMsg({ type: 'success', text: `Imported ${inserted.toLocaleString()} records.` });
       setPage(0);
-      setActiveProductSearch(''); setProductSearch('');
-      setActiveCompanySearch(''); setCompanySearch('');
+      setProductSearch(''); setCompanySearch('');
     } catch (err) {
       setUploadMsg({ type: 'error', text: err instanceof Error ? err.message : 'Upload failed' });
     } finally {
@@ -253,81 +271,87 @@ export function ImportInfo() {
   const hasFilters = !!(activeProductSearch.trim() || activeCompanySearch.trim());
   const tableW = useMemo(() => COLS.reduce((s, c) => s + (colWidths[c.key] || c.defaultWidth), 0), [colWidths]);
 
-  function clearSearch() {
-    setProductSearch(''); setCompanySearch('');
-  }
-
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 210px)', minHeight: 480 }}>
 
-      {/* Top bar */}
-      <div className="flex flex-col gap-2 mb-3 flex-shrink-0">
-        <div className="flex gap-2 flex-wrap items-center">
-          {/* Primary search: product name */}
-          <div className="relative flex-1 min-w-[200px]">
+      {/* ── Search bar ── */}
+      <div className="flex flex-col gap-0 mb-3 flex-shrink-0">
+        {/* Row 1: main search + buttons */}
+        <div className="flex gap-2 items-stretch">
+          {/* Product search */}
+          <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             <input
               type="text"
               placeholder="Search product name…"
               value={productSearch}
               onChange={e => setProductSearch(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             />
-            {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-blue-400" />}
-            {!loading && productSearch && (
-              <button onClick={() => setProductSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+            {loading
+              ? <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-blue-400" />
+              : productSearch && (
+                <button onClick={() => setProductSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )
+            }
           </div>
 
           {/* Advanced toggle */}
           <button
             onClick={() => setShowAdvanced(p => !p)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs border rounded-lg transition-colors whitespace-nowrap ${showAdvanced ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border rounded-lg transition-colors whitespace-nowrap ${
+              showAdvanced
+                ? 'bg-blue-50 border-blue-400 text-blue-700'
+                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+            }`}
           >
             Advanced
-            <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+            <ChevronDownIcon className={`w-4 h-4 transition-transform duration-200 ${showAdvanced ? 'rotate-180' : ''}`} />
           </button>
 
-          {hasFilters && (
-            <button onClick={clearSearch} className="flex items-center gap-1 px-3 py-2 text-xs bg-amber-50 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100 whitespace-nowrap">
-              <X className="w-3 h-3" /> Clear
-            </button>
-          )}
-
-          {(userRole === 'admin' || userRole === 'manager') && (
-            <button onClick={() => setShowClear(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs bg-white border border-red-300 text-red-600 rounded-lg hover:bg-red-50 whitespace-nowrap">
-              <Trash2 className="w-3.5 h-3.5" /> Clear All
-            </button>
-          )}
-
-          <label className="flex items-center gap-1.5 px-3 py-2 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer whitespace-nowrap">
-            <Upload className="w-3.5 h-3.5" />
+          {/* Upload */}
+          <label className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer whitespace-nowrap transition-colors">
+            <Upload className="w-4 h-4" />
             {uploading ? 'Uploading…' : 'Upload CSV/Excel'}
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleUpload} className="hidden" disabled={uploading} />
           </label>
+
+          {(userRole === 'admin' || userRole === 'manager') && (
+            <button onClick={() => setShowClear(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm border border-red-300 text-red-600 rounded-lg hover:bg-red-50 whitespace-nowrap transition-colors">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        {/* Advanced search row */}
+        {/* Row 2: advanced panel */}
         {showAdvanced && (
-          <div className="flex gap-2 flex-wrap items-center p-3 bg-gray-50 border border-gray-200 rounded-lg">
-            <div className="relative flex-1 min-w-[180px]">
+          <div className="mt-2 flex gap-3 items-center px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <div className="relative flex-1 min-w-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
               <input
                 type="text"
                 placeholder="Company name (importer / exporter)…"
                 value={companySearch}
                 onChange={e => setCompanySearch(e.target.value)}
-                className="w-full pl-8 pr-7 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full pl-8 pr-7 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               />
               {companySearch && (
-                <button onClick={() => setCompanySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <button onClick={() => setCompanySearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
-            <span className="text-xs text-gray-400">Searches both importer and exporter fields</span>
+            <span className="text-xs text-gray-400 whitespace-nowrap">Searches both importer and exporter fields</span>
+            {hasFilters && (
+              <button
+                onClick={() => { setProductSearch(''); setCompanySearch(''); }}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-amber-50 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100 whitespace-nowrap"
+              >
+                <X className="w-3 h-3" /> Clear all
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -371,7 +395,7 @@ export function ImportInfo() {
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-auto rounded-lg border border-gray-200 shadow-sm" style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
-          <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', width: tableW }}>
+          <table className="border-collapse" style={{ tableLayout: 'fixed', width: tableW, fontSize: '11px' }}>
             <thead className="sticky top-0 z-20">
               <tr className="bg-gray-700 text-white">
                 {COLS.map(col => (
@@ -379,12 +403,13 @@ export function ImportInfo() {
                     className="px-0 py-0 text-left font-semibold border-r border-gray-600 last:border-r-0 overflow-hidden">
                     <button onClick={() => handleSort(col.key)}
                       className="flex items-center gap-1 px-2 py-1.5 hover:text-blue-300 text-left w-full overflow-hidden" title={col.label}>
-                      <span className={`truncate ${col.small ? 'text-[9px] font-medium tracking-wide text-gray-300' : 'text-xs'}`}>{col.label}</span>
+                      <span className={`truncate ${col.dimHeader ? 'text-[9.5px] text-gray-300 font-medium tracking-wide' : 'text-[10.5px]'}`}>
+                        {col.label}
+                      </span>
                       {sortField === col.key
-                        ? (sortDir === 'asc' ? <ChevronUp className="w-3 h-3 flex-shrink-0 text-blue-300" /> : <ChevronDown className="w-3 h-3 flex-shrink-0 text-blue-300" />)
-                        : <ChevronsUpDown className="w-3 h-3 flex-shrink-0 text-gray-500" />}
+                        ? (sortDir === 'asc' ? <ChevronUp className="w-2.5 h-2.5 flex-shrink-0 text-blue-300" /> : <ChevronDown className="w-2.5 h-2.5 flex-shrink-0 text-blue-300" />)
+                        : <ChevronsUpDown className="w-2.5 h-2.5 flex-shrink-0 text-gray-500" />}
                     </button>
-                    {/* Resize handle */}
                     <div onMouseDown={e => onResizeMouseDown(e, col.key)}
                       className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize z-10"
                       style={{ background: 'transparent' }}
@@ -398,20 +423,20 @@ export function ImportInfo() {
             <tbody>
               {rows.map((row, i) => (
                 <tr key={row.id} className={`border-b border-gray-100 hover:bg-blue-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
-                  <td style={{ width: colWidths.date }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden whitespace-nowrap text-gray-600">{fmtDate(row.date)}</td>
-                  <td style={{ width: colWidths.hs_code }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden whitespace-nowrap font-mono text-gray-600">{row.hs_code}</td>
-                  <td style={{ width: colWidths.product_name }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden font-medium text-gray-900" title={row.product_name}><div className="truncate">{row.product_name}</div></td>
-                  <td style={{ width: colWidths.quantity }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden text-right whitespace-nowrap text-gray-700">{row.quantity.toLocaleString()}</td>
-                  <td style={{ width: colWidths.unit }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden whitespace-nowrap text-gray-600">{row.unit}</td>
-                  <td style={{ width: colWidths.unit_rate }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden text-right whitespace-nowrap font-medium text-emerald-700">{fmtNum(row.unit_rate)}</td>
-                  <td style={{ width: colWidths.currency }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden whitespace-nowrap text-gray-600">{row.currency}</td>
-                  <td style={{ width: colWidths.total_usd }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden text-right whitespace-nowrap font-medium text-blue-700">{fmtNum(row.total_usd)}</td>
-                  <td style={{ width: colWidths.origin }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden text-gray-600" title={row.origin}><div className="truncate">{row.origin}</div></td>
-                  <td style={{ width: colWidths.destination }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden text-gray-600" title={row.destination}><div className="truncate">{row.destination}</div></td>
-                  <td style={{ width: colWidths.exporter }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden text-gray-700" title={row.exporter}><div className="truncate">{row.exporter}</div></td>
-                  <td style={{ width: colWidths.importer }} className="px-2 py-1.5 border-r border-gray-100 overflow-hidden text-gray-700" title={row.importer}><div className="truncate">{row.importer}</div></td>
-                  <td style={{ width: colWidths.type }} className="px-2 py-1.5 overflow-hidden">
-                    {row.type ? <span className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap ${getTypeColor(row.type)}`}>{row.type}</span> : '-'}
+                  <td style={{ width: colWidths.date }} className="px-2 py-1 border-r border-gray-100 overflow-hidden whitespace-nowrap text-gray-500 text-[10.5px]">{fmtDate(row.date)}</td>
+                  <td style={{ width: colWidths.hs_code }} className="px-2 py-1 border-r border-gray-100 overflow-hidden whitespace-nowrap font-mono text-gray-500 text-[10px]">{row.hs_code}</td>
+                  <td style={{ width: colWidths.product_name }} className="px-2 py-1 border-r border-gray-100 overflow-hidden font-medium text-gray-900 text-[11px]" title={row.product_name}><div className="truncate">{row.product_name}</div></td>
+                  <td style={{ width: colWidths.quantity }} className="px-2 py-1 border-r border-gray-100 overflow-hidden text-right whitespace-nowrap text-gray-700 text-[10.5px]">{row.quantity.toLocaleString()}</td>
+                  <td style={{ width: colWidths.unit }} className="px-2 py-1 border-r border-gray-100 overflow-hidden whitespace-nowrap text-gray-500 text-[10px] uppercase">{abbreviateUnit(row.unit)}</td>
+                  <td style={{ width: colWidths.unit_rate }} className="px-2 py-1 border-r border-gray-100 overflow-hidden text-right whitespace-nowrap font-medium text-emerald-700 text-[10.5px]">{fmtNum(row.unit_rate)}</td>
+                  <td style={{ width: colWidths.currency }} className="px-2 py-1 border-r border-gray-100 overflow-hidden whitespace-nowrap text-gray-500 text-[10px] font-mono">{row.currency}</td>
+                  <td style={{ width: colWidths.total_usd }} className="px-2 py-1 border-r border-gray-100 overflow-hidden text-right whitespace-nowrap font-medium text-blue-700 text-[10.5px]">{fmtNum(row.total_usd)}</td>
+                  <td style={{ width: colWidths.origin }} className="px-2 py-1 border-r border-gray-100 overflow-hidden text-gray-600 text-[10.5px]" title={row.origin}><div className="truncate">{row.origin}</div></td>
+                  <td style={{ width: colWidths.destination }} className="px-2 py-1 border-r border-gray-100 overflow-hidden text-gray-600 text-[10.5px]" title={row.destination}><div className="truncate">{row.destination}</div></td>
+                  <td style={{ width: colWidths.exporter }} className="px-2 py-1 border-r border-gray-100 overflow-hidden text-gray-700 text-[10.5px]" title={row.exporter}><div className="truncate">{row.exporter}</div></td>
+                  <td style={{ width: colWidths.importer }} className="px-2 py-1 border-r border-gray-100 overflow-hidden text-gray-700 text-[10.5px]" title={row.importer}><div className="truncate">{row.importer}</div></td>
+                  <td style={{ width: colWidths.type }} className="px-2 py-1 overflow-hidden">
+                    {row.type ? <span className={`inline-block px-1.5 py-0.5 rounded-full text-[9px] font-medium whitespace-nowrap ${getTypeColor(row.type)}`}>{row.type}</span> : '-'}
                   </td>
                 </tr>
               ))}
