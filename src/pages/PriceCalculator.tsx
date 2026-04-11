@@ -3,8 +3,9 @@ import { supabase } from '../lib/supabase';
 import { Layout } from '../components/Layout';
 import {
   Calculator, Settings as SettingsIcon, DollarSign,
-  ChevronDown, ChevronUp, Info, AlertTriangle, RefreshCw, TrendingDown,
+  ChevronDown, ChevronUp, Info, AlertTriangle, RefreshCw, TrendingDown, Database,
 } from 'lucide-react';
+import { ImportInfo } from '../components/ImportInfo';
 import {
   PricingConfig, FCLPackingType, FCLCapacity, CalcResult, LCLPackingType,
   FreightType, PurchaseCurrency,
@@ -268,7 +269,7 @@ function PurchasePriceField({ section, inputs, setInput, inrRate }: {
 }
 
 export function PriceCalculator() {
-  const [activeTab, setActiveTab] = useState<'calculator' | 'settings'>('calculator');
+  const [activeTab, setActiveTab] = useState<'calculator' | 'settings' | 'import_info'>('calculator');
   const [mode, setMode] = useState<'fcl' | 'lcl' | 'air'>('fcl');
   const [inputs, setInputs] = useState<any>(loadSavedInputs);
   const [config, setConfig] = useState<PricingConfig>(DEFAULT_CONFIG);
@@ -481,12 +482,16 @@ export function PriceCalculator() {
           <p className="text-xs text-gray-400">FCL / LCL / Air import costing · INR / USD · Live FX</p>
         </div>
 
-        <div className="border-b border-gray-200 mb-4 flex">
-          {(['calculator', 'settings'] as const).map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === tab ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              {tab === 'calculator' ? <Calculator className="w-3.5 h-3.5" /> : <SettingsIcon className="w-3.5 h-3.5" />}
-              <span className="capitalize">{tab}</span>
+        <div className="border-b border-gray-200 mb-4 flex overflow-x-auto">
+          {([
+            { key: 'calculator', label: 'Calculator', icon: <Calculator className="w-3.5 h-3.5" /> },
+            { key: 'settings', label: 'Settings', icon: <SettingsIcon className="w-3.5 h-3.5" /> },
+            { key: 'import_info', label: 'Import Info', icon: <Database className="w-3.5 h-3.5" /> },
+          ] as const).map((tab) => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.key ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {tab.icon}
+              <span>{tab.label}</span>
             </button>
           ))}
         </div>
@@ -1035,6 +1040,12 @@ export function PriceCalculator() {
                 {savingConfig ? 'Saving...' : 'Save Settings'}
               </button>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'import_info' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4" style={{ minHeight: '70vh', display: 'flex', flexDirection: 'column' }}>
+            <ImportInfo />
           </div>
         )}
       </div>
