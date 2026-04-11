@@ -449,6 +449,11 @@ export default function SalesOrders() {
     setPoBlobUrl(null);
     try {
       const res = await fetch(poUrl);
+      if (!res.ok) {
+        // Bucket missing or file deleted — show fallback, don't render error JSON
+        setPoBlobUrl(null);
+        return;
+      }
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       setPoBlobUrl(blobUrl);
@@ -456,6 +461,29 @@ export default function SalesOrders() {
       setPoBlobUrl(null);
     } finally {
       setPoLoading(false);
+    }
+  };
+
+  const handleDownloadPO = async (poUrl: string, filename?: string) => {
+    try {
+      const res = await fetch(poUrl);
+      if (!res.ok) {
+        showToast({ type: 'error', title: 'Download Failed', message: 'File not found. The storage bucket may not be set up yet.' });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      // Try to get filename from URL, fallback to provided name or generic name
+      const urlFilename = poUrl.split('/').pop()?.split('?')[0] || 'customer-po';
+      a.download = filename || urlFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast({ type: 'error', title: 'Download Failed', message: 'Could not download the file.' });
     }
   };
 
@@ -870,7 +898,15 @@ export default function SalesOrders() {
           size="xl"
         >
           <div className="flex flex-col gap-2" style={{ height: '75vh' }}>
-            <div className="flex justify-end">
+            {/* Action bar — always visible */}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => handleDownloadPO(selectedPOUrl!)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-green-700 border border-green-200 rounded-lg hover:bg-green-50 transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download
+              </button>
               <a
                 href={selectedPOUrl}
                 target="_blank"
@@ -881,6 +917,7 @@ export default function SalesOrders() {
                 Open in new tab
               </a>
             </div>
+
             {poLoading && (
               <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg border border-gray-200">
                 <div className="text-center text-gray-500">
@@ -900,17 +937,27 @@ export default function SalesOrders() {
               <div className="flex-1 flex items-center justify-center bg-gray-50 rounded-lg border border-gray-200">
                 <div className="text-center text-gray-500 px-6">
                   <FileText className="w-10 h-10 mx-auto mb-3 text-gray-400" />
-                  <p className="text-sm font-medium mb-1">Preview not available</p>
-                  <p className="text-xs text-gray-400 mb-4">The document cannot be displayed inline</p>
-                  <a
-                    href={selectedPOUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open document
-                  </a>
+                  <p className="text-sm font-medium mb-2">Document cannot be previewed</p>
+                  <p className="text-xs text-gray-400 mb-1">This usually means the storage bucket is not set up in Supabase.</p>
+                  <p className="text-xs text-gray-400 mb-5">Please run the storage setup migration, then re-upload the file.</p>
+                  <div className="flex justify-center gap-3">
+                    <button
+                      onClick={() => handleDownloadPO(selectedPOUrl!)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition"
+                    >
+                      <Download className="w-4 h-4" />
+                      Try Download
+                    </button>
+                    <a
+                      href={selectedPOUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Open in new tab
+                    </a>
+                  </div>
                 </div>
               </div>
             )}
