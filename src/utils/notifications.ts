@@ -65,21 +65,25 @@ export async function checkAndCreateLowStockNotifications() {
         .in('role', ['admin', 'warehouse']);
 
       if (users) {
+        // Only create once per day — check if already created today
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
         for (const user of users) {
-          const existingNotifications = await supabase
+          const { data: existingToday } = await supabase
             .from('notifications')
             .select('id')
             .eq('user_id', user.id)
             .eq('type', 'low_stock')
-            .eq('is_read', false)
+            .gte('created_at', todayStart.toISOString())
             .limit(1);
 
-          if (!existingNotifications.data?.length) {
+          if (!existingToday?.length) {
             await createNotification({
               userId: user.id,
               type: 'low_stock',
               title: 'Low Stock Alert',
-              message: `${lowStockProducts.length} batch(es) are running low on stock.`,
+              message: `${lowStockProducts.length} product(s) are running low on stock.`,
             });
           }
         }
@@ -118,16 +122,20 @@ export async function checkAndCreateExpiryNotifications() {
         .in('role', ['admin', 'warehouse', 'sales']);
 
       if (users) {
+        // Only create once per day — check if already created today
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
         for (const user of users) {
-          const existingNotifications = await supabase
+          const { data: existingToday } = await supabase
             .from('notifications')
             .select('id')
             .eq('user_id', user.id)
             .eq('type', 'near_expiry')
-            .eq('is_read', false)
+            .gte('created_at', todayStart.toISOString())
             .limit(1);
 
-          if (!existingNotifications.data?.length) {
+          if (!existingToday?.length) {
             await createNotification({
               userId: user.id,
               type: 'near_expiry',
@@ -162,13 +170,27 @@ export async function checkAndCreateFollowUpNotifications() {
         .in('role', ['admin', 'sales']);
 
       if (users) {
+        // Only create once per day — check if already created today (was missing before!)
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
         for (const user of users) {
-          await createNotification({
-            userId: user.id,
-            type: 'follow_up',
-            title: 'Follow-ups Due',
-            message: `You have ${dueActivities.length} follow-up(s) due today.`,
-          });
+          const { data: existingToday } = await supabase
+            .from('notifications')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('type', 'follow_up')
+            .gte('created_at', todayStart.toISOString())
+            .limit(1);
+
+          if (!existingToday?.length) {
+            await createNotification({
+              userId: user.id,
+              type: 'follow_up',
+              title: 'Follow-ups Due',
+              message: `You have ${dueActivities.length} follow-up(s) due today.`,
+            });
+          }
         }
       }
     }

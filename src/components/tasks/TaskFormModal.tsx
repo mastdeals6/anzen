@@ -273,8 +273,8 @@ export function TaskFormModal({ isOpen, onClose, onSuccess, initialData }: TaskF
   };
 
   const filteredUsers = users.filter(u =>
-    u.full_name.toLowerCase().includes(userSearch.toLowerCase()) ||
-    u.email.toLowerCase().includes(userSearch.toLowerCase())
+    u.full_name?.toLowerCase().includes(userSearch.toLowerCase()) ||
+    u.email?.toLowerCase().includes(userSearch.toLowerCase())
   );
 
   return (

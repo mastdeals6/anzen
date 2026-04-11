@@ -274,7 +274,7 @@ Bio Solutions Ltd,"789 Industrial Zone",Bandung,TRADER,022-5554321,David Chen,08
   };
 
   const filteredContacts = contacts.filter(contact => {
-    const matchesSearch = contact.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = contact.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (contact.contact_person?.toLowerCase().includes(searchTerm.toLowerCase())) ||
                          (contact.email?.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = filterType === 'all' || contact.customer_type === filterType;

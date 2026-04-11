@@ -134,22 +134,12 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
 
   const fixStaleStatuses = async () => {
     try {
-      const { data: stale } = await supabase
+      // Single bulk UPDATE — no loop, handles discounts + rounding edge cases
+      await supabase
         .from('purchase_invoices')
-        .select('id, balance_amount, paid_amount, total_amount, status')
+        .update({ status: 'paid', balance_amount: 0 })
         .eq('status', 'partial')
         .lte('balance_amount', 0.99);
-      if (stale && stale.length > 0) {
-        for (const inv of stale) {
-          const balance = Math.round(inv.balance_amount * 100) / 100;
-          if (balance <= 0) {
-            await supabase
-              .from('purchase_invoices')
-              .update({ status: 'paid', balance_amount: 0 })
-              .eq('id', inv.id);
-          }
-        }
-      }
     } catch (e) {
       console.error('fixStaleStatuses error:', e);
     }
@@ -511,6 +501,7 @@ export function PurchaseInvoiceManager({ canManage, onPayInvoice }: PurchaseInvo
         if (itemsError) throw itemsError;
 
         showToast({ type: 'success', title: 'Updated', message: 'Purchase invoice updated successfully!' });
+        await fixStaleStatuses();
       } else {
         let invoiceInsertData = { ...invoiceData, paid_amount: 0, status: 'unpaid', created_by: userData.user?.id };
         let { data: invoice, error: invoiceError } = await supabase

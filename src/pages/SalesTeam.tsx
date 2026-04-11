@@ -191,7 +191,7 @@ export function SalesTeam({ embedded = false }: { embedded?: boolean }) {
 
   const availableCustomers = allCustomers.filter(c =>
     !assignedCustomerIds.has(c.id) &&
-    (c.company_name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+    (c.company_name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
      (c.contact_person || '').toLowerCase().includes(customerSearch.toLowerCase()))
   );
 

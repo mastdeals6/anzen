@@ -49,8 +49,8 @@ export function ArchiveView({ canManage, onRefresh }: ArchiveViewProps) {
     if (searchTerm) {
       const filtered = archivedInquiries.filter(inq =>
         inq.inquiry_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        inq.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        inq.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        inq.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        inq.product_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (inq.lost_reason && inq.lost_reason.toLowerCase().includes(searchTerm.toLowerCase()))
       );
       setFilteredInquiries(filtered);

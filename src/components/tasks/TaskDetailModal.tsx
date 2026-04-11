@@ -507,7 +507,7 @@ export function TaskDetailModal({ isOpen, onClose, taskId, onUpdate }: TaskDetai
               {showMentions && (
                 <div className="absolute bottom-full left-0 mb-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto z-10">
                   {users
-                    .filter(u => u.full_name.toLowerCase().includes(mentionSearch.toLowerCase()))
+                    .filter(u => u.full_name?.toLowerCase().includes(mentionSearch.toLowerCase()))
                     .slice(0, 5)
                     .map(u => (
                       <button

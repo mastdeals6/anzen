@@ -71,7 +71,7 @@ export function SuppliersManager() {
     }
 
     const filtered = suppliers.filter(supplier =>
-      supplier.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      supplier.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       supplier.contact_person?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       supplier.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       supplier.phone?.toLowerCase().includes(searchTerm.toLowerCase())
